@@ -17,3 +17,17 @@
 
 cd $SRC/qemu/
 $SRC/qemu/scripts/oss-fuzz/build.sh
+
+# Generate minimal seed corpus for each fuzz target.
+# The coverage build falls back to seed corpus when the ClusterFuzz
+# corpus backup is unavailable (e.g. for newly integrated targets or
+# when the backup pipeline is broken).
+for target in $OUT/qemu-fuzz-i386-target-*; do
+  target_name=$(basename "$target")
+  [ -x "$target" ] || continue
+  [ -f "$OUT/${target_name}_seed_corpus.zip" ] && continue
+  seed_dir=$(mktemp -d)
+  printf '\x00\x00\x00\x00' > "$seed_dir/null_seed"
+  (cd "$seed_dir" && zip -q "$OUT/${target_name}_seed_corpus.zip" null_seed)
+  rm -rf "$seed_dir"
+done
