@@ -15,9 +15,32 @@
 #
 ################################################################################
 
+# Raksha depends on rules_proto_grpc 4.1.1 which emits the `nocopts` cc_library
+# attribute removed in Bazel 7, and WORKSPACE which Bazel 9+ hides behind bzlmod.
+export USE_BAZEL_VERSION=6.5.0
+
 # Extend with oss-fuzz settings. To be upsteamed?
 cd $SRC/raksha
 git apply  --ignore-space-change --ignore-whitespace $SRC/raksha-fuzztest.diff
+
+# Raksha enables -Werror. The pinned abseil uses __is_trivially_relocatable which
+# is deprecated in the base-builder's Clang 22, causing -Wdeprecated-builtins errors.
+echo "build --cxxopt=-Wno-error=deprecated-builtins" >> .bazelrc
+
+# The pinned fuzztest version's setup_configs does not link the fuzzing engine
+# for OSS-Fuzz builds. Add the missing linkopts that the current fuzztest
+# setup_configs.sh generates (fuzzer runtime + UBSan runtime).
+ARCH=$(uname -m)
+FUZZER_LIB=$(find /usr -name "libclang_rt.fuzzer_no_main*" 2>/dev/null | grep "$ARCH" | grep '\.a$' | head -1)
+if [ -z "$FUZZER_LIB" ]; then
+  echo "ERROR: Could not find libclang_rt.fuzzer_no_main for $ARCH" >&2
+  exit 1
+fi
+echo "build:oss-fuzz --linkopt=$FUZZER_LIB" >> .bazelrc
+if [ "${SANITIZER:-}" = "undefined" ]; then
+  UBSAN_LIB=$(find /usr -name "libclang_rt.ubsan_standalone_cxx*" 2>/dev/null | grep "$ARCH" | grep '\.a$' | head -1)
+  [ -n "$UBSAN_LIB" ] && echo "build:oss-fuzz --linkopt=$UBSAN_LIB" >> .bazelrc
+fi
 
 # Compile gfuzztests
 export FUZZTEST_TARGET_FOLDER="//src/..."
