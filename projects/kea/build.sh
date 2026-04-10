@@ -14,8 +14,23 @@
 # limitations under the License.
 #
 ################################################################################
-# Copy key fuzzers/dict/seeds
+
+# Copy kea-specific fuzzers/dict/seeds from ada-fuzzers
 cp -r $SRC/ada-fuzzers/projects/kea $SRC/kea-fuzzer
+
+# Remove the rest of ada-fuzzers: Fuzz Introspector scans the entire $SRC
+# tree, and ada-fuzzers contains harnesses for unrelated projects (llvm, gpsd,
+# etc.) that inflate the analysis scope.
+rm -rf $SRC/ada-fuzzers
 
 # Run build script
 $SRC/kea-fuzzer/build.sh
+
+# For introspector builds: remove kea test directories after compilation.
+# kea has ~2800 source files; a large fraction are unit test files that
+# Fuzz Introspector parses with tree-sitter post-build, causing a timeout.
+# Tests have already been compiled into the bitcode, so removing the source
+# files only affects the post-build source analysis, not the LLVM IR.
+if [ "$SANITIZER" = "introspector" ]; then
+  find $SRC/kea -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
+fi
