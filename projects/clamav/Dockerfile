@@ -25,7 +25,16 @@ RUN apt-get update && apt-get install -y \
 # oss-fuzz requires nightly for the -Z option, so we use that as well.
 #
 RUN rustup update nightly
+RUN rustup component add rust-src --toolchain nightly-x86_64-unknown-linux-gnu
 ENV RUSTUP_TOOLCHAIN=nightly-x86_64-unknown-linux-gnu
+
+# Create symlink so coverage reports can find Rust stdlib source files.
+# Rust embeds paths like /rustc/<hash>/library/... in coverage data;
+# this makes the actual source available at that path.
+RUN RUST_COMMIT=$(rustc -vV | sed -n 's/commit-hash: //p') && \
+    RUST_SYSROOT=$(rustc --print sysroot) && \
+    mkdir -p /rustc && \
+    ln -sf "${RUST_SYSROOT}/lib/rustlib/src/rust" "/rustc/${RUST_COMMIT}"
 
 #
 # Build static libs for dependencies
