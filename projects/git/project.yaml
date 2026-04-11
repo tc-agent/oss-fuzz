@@ -9,8 +9,6 @@ auto_ccs:
   - "david@adalogics.com"
   - "arthur.chan@adalogics.com"
 main_repo: 'https://github.com/git/git'
-
-# Disable honggfuzz due to undiagnosed build failures
 fuzzing_engines:
   - libfuzzer
   - afl
