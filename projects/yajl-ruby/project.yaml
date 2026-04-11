@@ -1,5 +1,5 @@
 homepage: https://github.com/brianmario/yajl-ruby
-language: c++
+language: c
 primary_contact: seniorlopez@gmail.com
 fuzzing_engines:
   - libfuzzer
