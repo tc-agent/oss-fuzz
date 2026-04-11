@@ -1,0 +1,125 @@
+# Template — injected into oss-fuzz fork branches by pr_server.py at PR submission time.
+# Not used directly in this repo.
+name: Fuzz Verify
+on: [push]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz-verify:
+    name: Fuzz Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FUZZ_SECONDS: "300"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect project
+        id: detect
+        run: |
+          PROJECT=$(git diff --name-only origin/master...HEAD | grep '^projects/' | cut -d/ -f2 | sort -u | head -1)
+          if [ -z "$PROJECT" ]; then
+            echo "::error::No project changes detected"
+            exit 1
+          fi
+          echo "name=$PROJECT" >> "$GITHUB_OUTPUT"
+          echo "Project: $PROJECT"
+
+      - name: Install oss-fuzz deps
+        run: pip install -r infra/ci/requirements.txt 2>/dev/null || pip install docker
+
+      - name: Build image
+        env:
+          PROJECT: ${{ steps.detect.outputs.name }}
+        run: echo n | python3 infra/helper.py build_image "$PROJECT"
+
+      - name: Build fuzzers
+        env:
+          PROJECT: ${{ steps.detect.outputs.name }}
+        run: echo n | python3 infra/helper.py build_fuzzers --sanitizer address "$PROJECT"
+
+      - name: Fuzz
+        env:
+          PROJECT: ${{ steps.detect.outputs.name }}
+        run: |
+          OUT="build/out/$PROJECT"
+
+          HARNESSES=""
+          for f in "$OUT"/*; do
+            [ -f "$f" ] && [ -x "$f" ] || continue
+            case "$(basename "$f")" in
+              *.options|*.dict|*_seed_corpus.zip|llvm-symbolizer) continue ;;
+            esac
+            HARNESSES="$HARNESSES $(basename "$f")"
+          done
+          HARNESSES=$(echo $HARNESSES | xargs)
+
+          if [ -z "$HARNESSES" ]; then
+            echo "::error::No harness binaries found in $OUT"
+            exit 1
+          fi
+
+          N=$(echo $HARNESSES | wc -w)
+          TIME_EACH=$(( FUZZ_SECONDS / N ))
+          [ "$TIME_EACH" -lt 30 ] && TIME_EACH=30
+          echo "Harnesses ($N): $HARNESSES — ${TIME_EACH}s each"
+
+          for h in $HARNESSES; do
+            echo "::group::$h"
+            mkdir -p "corpus/$PROJECT/$h"
+            timeout $((TIME_EACH + 60)) python3 infra/helper.py run_fuzzer \
+              --corpus-dir "$(pwd)/corpus/$PROJECT/$h" \
+              "$PROJECT" "$h" -- \
+              "-max_total_time=$TIME_EACH" 2>&1 || true
+            echo "Corpus: $(find "corpus/$PROJECT/$h" -type f | wc -l) files"
+            echo "::endgroup::"
+          done
+
+      - name: Coverage
+        env:
+          PROJECT: ${{ steps.detect.outputs.name }}
+        run: |
+          echo n | python3 infra/helper.py build_fuzzers --sanitizer coverage "$PROJECT"
+
+          mkdir -p "build/corpus"
+          ln -sfn "$(pwd)/corpus/$PROJECT" "build/corpus/$PROJECT"
+
+          python3 infra/helper.py coverage \
+            --no-corpus-download --no-serve \
+            "$PROJECT" 2>&1 || true
+
+      - name: Verify coverage
+        run: |
+          SUMMARY=$(find build/out/ -name "summary.json" -path "*/report/linux/*" 2>/dev/null | head -1)
+          if [ -z "$SUMMARY" ]; then
+            echo "::error::Coverage summary not found"
+            exit 1
+          fi
+
+          LINE_PCT=$(jq '.data[0].totals.lines.percent' "$SUMMARY")
+          LINE_COV=$(jq '.data[0].totals.lines.covered' "$SUMMARY")
+          LINE_TOT=$(jq '.data[0].totals.lines.count' "$SUMMARY")
+          echo "## Coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo "Line coverage: **${LINE_PCT}%** (${LINE_COV}/${LINE_TOT})" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$(echo "$LINE_PCT <= 0" | bc -l)" = "1" ]; then
+            echo "::error::Zero line coverage — harnesses are not reaching target code"
+            exit 1
+          fi
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report
+          path: build/out/*coverage*/report/
+          if-no-files-found: ignore
