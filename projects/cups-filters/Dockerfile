@@ -15,23 +15,32 @@
 ################################################################################
 
 FROM gcr.io/oss-fuzz-base/base-builder
-RUN apt-get update && apt-get install -y make autoconf automake libtool build-essential 
+RUN apt-get update && apt-get install -y make autoconf automake libtool build-essential cmake \
+    libexif-dev libglib2.0-dev libavahi-glib-dev liblcms2-dev libfreetype6-dev libfontconfig1-dev \
+    libpoppler-cpp-dev poppler-utils libunistring-dev libsystemd-dev libcap-dev gettext autopoint \
+    libcups2-dev libavahi-client-dev ghostscript mupdf-tools
 
-### for cups-filters-2.x
-# RUN sed --in-place 's/focal/noble/g' /etc/apt/sources.list
-# RUN apt update && apt-get install -y chrpath gnutls-dev libppd-dev libavahi-common-dev libavahi-client-dev autopoint gettext libcups2-dev ghostscript mupdf-tools 
-# RUN git clone --depth 1 https://github.com/OpenPrinting/cups-filters.git
-
-### for cups-filters-1.x
-RUN apt update && apt-get install -y libexif-dev libglib2.0-dev libavahi-glib-dev liblcms2-dev libfreetype6-dev libfontconfig1-dev libqpdf-dev libpoppler-cpp-dev poppler-utils \
-libunistring-dev libsystemd-dev libcap-dev gettext autopoint libcups2-dev libavahi-client-dev ghostscript mupdf-tools 
+# Build QPDF 11.x from source — cups-filters 1.x now requires QPDF >= 11
+# (the base-builder ships QPDF 9.x which lacks replaceKey() and POINTERHOLDER_TRANSITION support)
+# Unset LIB_FUZZING_ENGINE so QPDF's own fuzz targets use the standalone runner
+# instead of linking against the not-yet-available fuzzing engine library.
+# Force the new C++11 ABI so QPDF symbols match what cups-filters expects at link time.
+RUN git clone --depth 1 --branch v11.10.1 https://github.com/qpdf/qpdf.git /tmp/qpdf && \
+    cd /tmp/qpdf && \
+    env -u LIB_FUZZING_ENGINE cmake -S . -B build \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_BUILD_TYPE=Release \
+        "-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=1" && \
+    env -u LIB_FUZZING_ENGINE cmake --build build --parallel $(nproc) && \
+    cmake --install build && \
+    ldconfig && \
+    rm -rf /tmp/qpdf
 
 # ubuntu 20.04 only supports cups-filters 1.x
 RUN git clone --depth 1 -b "1.x" https://github.com/OpenPrinting/cups-filters.git
 RUN git clone --depth 1 https://github.com/OpenPrinting/fuzzing.git
-        
+
 RUN cp $SRC/fuzzing/projects/cups-filters/oss_fuzz_build.sh $SRC/build.sh
 
-WORKDIR $SRC/cups-filters                   
+WORKDIR $SRC/cups-filters
 COPY run_tests.sh $SRC/
-
