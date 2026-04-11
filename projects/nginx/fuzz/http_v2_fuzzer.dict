@@ -1,0 +1,44 @@
+# HTTP/2 frame types
+h2_data="\x00"
+h2_headers="\x01"
+h2_priority="\x02"
+h2_rst_stream="\x03"
+h2_settings="\x04"
+h2_push_promise="\x05"
+h2_ping="\x06"
+h2_goaway="\x07"
+h2_window_update="\x08"
+h2_continuation="\x09"
+
+# HTTP/2 frame flags
+h2_flag_end_stream="\x01"
+h2_flag_end_headers="\x04"
+h2_flag_padded="\x08"
+h2_flag_priority="\x20"
+h2_flag_ack="\x01"
+
+# Common settings IDs (big-endian uint16)
+h2_header_table_size="\x00\x01"
+h2_enable_push="\x00\x02"
+h2_max_concurrent_streams="\x00\x03"
+h2_initial_window_size="\x00\x04"
+h2_max_frame_size="\x00\x05"
+
+# HPACK static table indices
+hpack_authority="\x01"
+hpack_method_get="\x02"
+hpack_method_post="\x03"
+hpack_path_root="\x04"
+hpack_path_index="\x05"
+hpack_scheme_http="\x06"
+hpack_scheme_https="\x07"
+hpack_status_200="\x08"
+
+# Stream IDs
+stream_0="\x00\x00\x00\x00"
+stream_1="\x00\x00\x00\x01"
+stream_3="\x00\x00\x00\x03"
+
+# Common frame sizes
+zero_len="\x00\x00\x00"
+small_len="\x00\x00\x0c"
