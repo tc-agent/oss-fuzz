@@ -24,3 +24,4 @@ COPY fuzz*.cc $SRC/
 COPY fuzz*.h $SRC/
 
 COPY fuzz_patch.patch $SRC/
+COPY seeds $SRC/seeds
