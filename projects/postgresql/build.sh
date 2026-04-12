@@ -24,21 +24,6 @@ chown -R fuzzuser .
 
 cd bld
 
-# Build icu 66 for postgres
-wget https://github.com/unicode-org/icu/releases/download/release-66-1/icu4c-66_1-src.tgz
-tar -xzf icu4c-66_1-src.tgz
-pushd icu/source
-./configure --prefix=/opt/icu66  --enable-renaming CC=clang CXX=clang++ CFLAGS="" CXXFLAGS=""
-make -j$(nproc)
-make install
-popd
-
-# Add environment flags for icu 66
-export PKG_CONFIG_PATH=/opt/icu66/lib/pkgconfig
-export LD_LIBRARY_PATH=/opt/icu66/lib
-export ICU_CFLAGS="-I/opt/icu66/include"
-export ICU_LIBS="-L/opt/icu66/lib -licui18n -licuuc -licudata"
-
 CC="" CXX="" CFLAGS="" CXXFLAGS="" su fuzzuser -c ../configure
 cd src/backend/fuzzer
 su fuzzuser -c "make -j10 createdb"
