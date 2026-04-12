@@ -26,3 +26,31 @@ if [[ ! -z "${REPLAY_ENABLED-}" ]]; then
 fi
 
 ./ossfuzz.sh
+
+# Compile standalone harnesses against the already-built static libs.
+BUILD=$SRC/curl_fuzzer/build
+CURL_INCLUDE=$BUILD/curl-install/include
+LIBS="$BUILD/curl-install/lib/libcurl.a \
+      $BUILD/nghttp2-install/lib/libnghttp2.a \
+      $BUILD/openssl-install/lib/libssl.a \
+      $BUILD/openssl-install/lib/libcrypto.a \
+      $BUILD/zlib-install/lib/libz.a \
+      $BUILD/zstd-install/lib/libzstd.a \
+      $BUILD/libidn2-install/lib/libidn2.a \
+      $BUILD/openldap-install/lib/libldap.a \
+      $BUILD/openldap-install/lib/liblber.a"
+
+for harness in fuzz_parsedate fuzz_escape fuzz_cookie fuzz_mime fuzz_netrc fuzz_hsts fuzz_altsvc; do
+  $CXX $CXXFLAGS -DCURL_DISABLE_DEPRECATION \
+    -I"$CURL_INCLUDE" \
+    "$SRC/harnesses/${harness}.cc" \
+    -o "$OUT/${harness}" \
+    $LIB_FUZZING_ENGINE \
+    $LIBS \
+    -lpthread -lm
+
+  # Zip seed corpus if present
+  if [ -d "$SRC/seeds/${harness}" ]; then
+    zip -j "$OUT/${harness}_seed_corpus.zip" "$SRC/seeds/${harness}/"*
+  fi
+done
