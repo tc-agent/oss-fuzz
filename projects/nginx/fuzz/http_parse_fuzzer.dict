@@ -1,0 +1,57 @@
+# HTTP request methods
+http_method_get="GET "
+http_method_post="POST "
+http_method_put="PUT "
+http_method_delete="DELETE "
+http_method_head="HEAD "
+http_method_options="OPTIONS "
+http_method_patch="PATCH "
+http_method_connect="CONNECT "
+http_method_trace="TRACE "
+
+# HTTP versions
+http_ver_10="HTTP/1.0"
+http_ver_11="HTTP/1.1"
+
+# Common request headers
+http_hdr_host="Host: "
+http_hdr_content_length="Content-Length: "
+http_hdr_content_type="Content-Type: "
+http_hdr_transfer_encoding="Transfer-Encoding: "
+http_hdr_connection="Connection: "
+http_hdr_accept="Accept: "
+http_hdr_accept_encoding="Accept-Encoding: "
+http_hdr_authorization="Authorization: "
+http_hdr_cookie="Cookie: "
+http_hdr_user_agent="User-Agent: "
+http_hdr_upgrade="Upgrade: "
+http_hdr_expect="Expect: "
+
+# Header values
+http_val_chunked="chunked"
+http_val_keep_alive="keep-alive"
+http_val_close="close"
+http_val_gzip="gzip"
+http_val_deflate="deflate"
+http_val_identity="identity"
+http_val_100_continue="100-continue"
+
+# HTTP status lines
+http_status_200="HTTP/1.1 200 OK"
+http_status_301="HTTP/1.1 301 Moved Permanently"
+http_status_400="HTTP/1.1 400 Bad Request"
+http_status_404="HTTP/1.1 404 Not Found"
+http_status_500="HTTP/1.1 500 Internal Server Error"
+
+# Chunk encoding special values
+http_chunk_last="0\x0d\x0a\x0d\x0a"
+http_chunk_ff="ff\x0d\x0a"
+
+# CRLF terminators
+http_crlf="\x0d\x0a"
+http_crlf2="\x0d\x0a\x0d\x0a"
+
+# Common paths
+http_path_root="/ "
+http_path_index="/index.html "
+http_path_api="/api/ "
