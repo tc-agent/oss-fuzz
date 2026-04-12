@@ -62,10 +62,19 @@ void fuzz_json_locate_key(const uint8_t *data, size_t size) {
   const char *key_start;
   const char *key_end;
   int comma_pos;
+  json_engine_t je;
+  MEM_ROOT mem_root;
 
-  json_locate_key(fuzz_str, fuzz_str + size, fuzz_key, &key_start, &key_end,
-                  &comma_pos);
+  init_alloc_root(PSI_INSTRUMENT_MEM, &mem_root, BLOCK_SIZE_JSON_DYN_ARRAY, 0,
+                  MYF(0));
+  mem_root_dynamic_array_init(&mem_root, PSI_INSTRUMENT_MEM, &je.stack,
+                              sizeof(int), NULL, JSON_DEPTH_DEFAULT,
+                              JSON_DEPTH_INC, MYF(0));
 
+  json_locate_key(&je, fuzz_str, fuzz_str + size, fuzz_key, &key_start,
+                  &key_end, &comma_pos);
+
+  free_root(&mem_root, MYF(0));
   free(fuzz_str);
   free(fuzz_key);
 }
