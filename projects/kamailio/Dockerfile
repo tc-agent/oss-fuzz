@@ -20,3 +20,5 @@ RUN git clone https://github.com/kamailio/kamailio
 
 WORKDIR $SRC
 COPY build.sh $SRC/
+COPY fuzz_via.c $SRC/
+COPY seeds/ $SRC/seeds/

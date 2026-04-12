@@ -22,6 +22,9 @@ export LD_EXTRA_OPTS="${CFLAGS}"
 
 sed -i 's/int main(/int main2(/g' ./src/main.c
 
+# Copy custom harnesses into the source tree so coverage builds find them.
+cp $SRC/fuzz_via.c ./misc/fuzz/fuzz_via.c
+
 export MEMPKG=sys
 make Q=verbose || true
 cd src
@@ -44,3 +47,42 @@ $CXX $CXXFLAGS $LIB_FUZZING_ENGINE fuzz_parse_msg.o -o $OUT/fuzz_parse_msg \
     -DFAST_LOCK -D__CPU_i386 ./src/libkamilio.a \
     -I./src/ -I./src/core/parser -ldl -lresolv -lm
 
+$CC $CFLAGS -c ./misc/fuzz/fuzz_parse_digest.c \
+    -DFAST_LOCK -D__CPU_i386 ./src/libkamilio.a \
+    -I./src/ -I./src/core/parser -ldl -lresolv -lm
+
+$CXX $CXXFLAGS $LIB_FUZZING_ENGINE fuzz_parse_digest.o -o $OUT/fuzz_parse_digest \
+    -DFAST_LOCK -D__CPU_i386 ./src/libkamilio.a \
+    -I./src/ -I./src/core/parser -ldl -lresolv -lm
+
+$CC $CFLAGS -c ./misc/fuzz/fuzz_pv_parse.c \
+    -DFAST_LOCK -D__CPU_i386 ./src/libkamilio.a \
+    -I./src/ -I./src/core/parser -ldl -lresolv -lm
+
+$CXX $CXXFLAGS $LIB_FUZZING_ENGINE fuzz_pv_parse.o -o $OUT/fuzz_pv_parse \
+    -DFAST_LOCK -D__CPU_i386 ./src/libkamilio.a \
+    -I./src/ -I./src/core/parser -ldl -lresolv -lm
+
+$CC $CFLAGS -c ./misc/fuzz/fuzz_strutils.c \
+    -DFAST_LOCK -D__CPU_i386 ./src/libkamilio.a \
+    -I./src/ -I./src/core/parser -ldl -lresolv -lm
+
+$CXX $CXXFLAGS $LIB_FUZZING_ENGINE fuzz_strutils.o -o $OUT/fuzz_strutils \
+    -DFAST_LOCK -D__CPU_i386 ./src/libkamilio.a \
+    -I./src/ -I./src/core/parser -ldl -lresolv -lm
+
+$CC $CFLAGS -c ./misc/fuzz/fuzz_via.c \
+    -DFAST_LOCK -D__CPU_i386 ./src/libkamilio.a \
+    -I./src/ -I./src/core/parser -ldl -lresolv -lm
+
+$CXX $CXXFLAGS $LIB_FUZZING_ENGINE fuzz_via.o -o $OUT/fuzz_via \
+    -DFAST_LOCK -D__CPU_i386 ./src/libkamilio.a \
+    -I./src/ -I./src/core/parser -ldl -lresolv -lm
+
+# Seed corpora (packed into zips for OSS-Fuzz)
+for harness in fuzz_parse_digest fuzz_pv_parse fuzz_strutils fuzz_via; do
+    seed_dir="$SRC/seeds/${harness}"
+    if [ -d "$seed_dir" ]; then
+        zip -j "$OUT/${harness}_seed_corpus.zip" "$seed_dir"/*
+    fi
+done
