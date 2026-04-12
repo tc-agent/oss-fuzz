@@ -11,7 +11,5 @@ sanitizers:
 file_github_issue: True
 
 fuzzing_engines:
-  - afl
-  - honggfuzz
   - libfuzzer
 
