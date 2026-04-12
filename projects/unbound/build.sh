@@ -26,6 +26,8 @@ $CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_1.o fuzz_1.c
 $CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_2.o fuzz_2.c
 $CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_3.o fuzz_3.c
 $CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_4.o fuzz_4.c
+$CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_config.o fuzz_config.c
+$CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_zonefile.o fuzz_zonefile.c
 
 # get the LIBOBJS with the replaced functions needed for linking.
 LIBOBJS=`make --eval 'echolibobjs: ; @echo "$(LIBOBJS)"' echolibobjs`
@@ -85,4 +87,41 @@ $CXX $CXXFLAGS -std=c++11 \
   $OBJECTS_TO_LINK \
   $LIBOBJS
 
+$CXX $CXXFLAGS -std=c++11 \
+  $LIB_FUZZING_ENGINE \
+  -lssl -lcrypto -pthread \
+  -o $OUT/fuzz_config_fuzzer \
+  fuzz_config.o \
+  $OBJECTS_TO_LINK \
+  $LIBOBJS
+
+$CXX $CXXFLAGS -std=c++11 \
+  $LIB_FUZZING_ENGINE \
+  -lssl -lcrypto -pthread \
+  -o $OUT/fuzz_zonefile_fuzzer \
+  fuzz_zonefile.o \
+  $OBJECTS_TO_LINK \
+  $LIBOBJS
+
 wget --directory-prefix $OUT https://github.com/jsha/unbound/raw/fuzzing-corpora/testdata/parse_packet_fuzzer_seed_corpus.zip
+
+# unbound's config parser leaks strdup'd token strings on bison error recovery;
+# suppress LSAN for fuzz_config_fuzzer so it can fuzz rather than exit on startup.
+echo "[asan]
+detect_leaks=0" > "$OUT/fuzz_config_fuzzer.options"
+
+# Seed corpus for fuzz_config: config sections extracted from .rpl replay files
+# Each .rpl file starts with a server/stub-zone config block before CONFIG_END
+mkdir -p /tmp/fuzz_config_seeds
+for rpl in testdata/*.rpl; do
+  name=$(basename "$rpl" .rpl)
+  awk '/^CONFIG_END/{exit} !/^;/{print}' "$rpl" > /tmp/fuzz_config_seeds/"$name".conf
+done
+find /tmp/fuzz_config_seeds -empty -delete
+(cd /tmp/fuzz_config_seeds && zip -r "$OUT/fuzz_config_fuzzer_seed_corpus.zip" .)
+
+# Seed corpus for fuzz_zonefile: zone files from testdata
+mkdir -p /tmp/fuzz_zonefile_seeds
+find testdata/ -name "*.zone" -exec cp {} /tmp/fuzz_zonefile_seeds/ \;
+find /tmp/fuzz_zonefile_seeds -empty -delete
+(cd /tmp/fuzz_zonefile_seeds && zip -r "$OUT/fuzz_zonefile_fuzzer_seed_corpus.zip" .)
