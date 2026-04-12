@@ -1,0 +1,9 @@
+172.16.0.0/21		match bad netblock
+192.168.0.0/16		private
+10.0.0.0/8		rfc1918
+127.0.0.0/8		loopback
+::1/128			ipv6-loopback
+2001:db8::/32		documentation
+if 192.168.0.0/24
+192.168.0.1		gateway
+endif
