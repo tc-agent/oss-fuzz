@@ -16,7 +16,7 @@ ngx_objs=`echo objs/src/fuzz/wrappers.o $ngx_all_objs $ngx_modules_obj \
 
 cat << END                                                    >> $NGX_MAKEFILE
 
-fuzzers: objs/http_request_fuzzer
+fuzzers: objs/http_request_fuzzer objs/http_v2_fuzzer objs/http_parse_fuzzer objs/proxy_protocol_fuzzer
 
 objs/src/fuzz/wrappers.o:
 	\$(CC) $ngx_compile_opt \$(CFLAGS) -o objs/src/fuzz/wrappers.o src/fuzz/wrappers.c
@@ -35,5 +35,32 @@ objs/http_request_fuzzer: $ngx_deps_fuzz
 	 $ngx_binexit$ngx_long_cont$ngx_objs \
    	 \$(LIB_FUZZING_ENGINE) $ngx_libs$ngx_link$ngx_main_link -lcrypt
 $ngx_long_end					    
+
+objs/http_v2_fuzzer: $ngx_deps_fuzz
+	\$(CXX) \$(CXXFLAGS) -DNDEBUG src/fuzz/http_v2_fuzzer.cc \
+	-o objs/http_v2_fuzzer \
+	\$(CORE_INCS) \$(HTTP_INCS) \
+	-I \$(SRC)/ \
+	$ngx_binexit$ngx_long_cont$ngx_objs \
+	\$(LIB_FUZZING_ENGINE) $ngx_libs$ngx_link$ngx_main_link -lcrypt
+$ngx_long_end
+
+objs/http_parse_fuzzer: $ngx_deps_fuzz
+	\$(CXX) \$(CXXFLAGS) -DNDEBUG src/fuzz/http_parse_fuzzer.cc \
+	-o objs/http_parse_fuzzer \
+	\$(CORE_INCS) \$(HTTP_INCS) \
+	-I \$(SRC)/ \
+	$ngx_binexit$ngx_long_cont$ngx_objs \
+	\$(LIB_FUZZING_ENGINE) $ngx_libs$ngx_link$ngx_main_link -lcrypt
+$ngx_long_end
+
+objs/proxy_protocol_fuzzer: $ngx_deps_fuzz
+	\$(CXX) \$(CXXFLAGS) -DNDEBUG src/fuzz/proxy_protocol_fuzzer.cc \
+	-o objs/proxy_protocol_fuzzer \
+	\$(CORE_INCS) \$(HTTP_INCS) \
+	-I \$(SRC)/ \
+	$ngx_binexit$ngx_long_cont$ngx_objs \
+	\$(LIB_FUZZING_ENGINE) $ngx_libs$ngx_link$ngx_main_link -lcrypt
+$ngx_long_end
 
 END
