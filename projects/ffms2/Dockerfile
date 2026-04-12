@@ -21,14 +21,6 @@ RUN apt-get update && \
     autoconf automake libtool zlib1g-dev pkg-config nasm
 
 RUN git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
-RUN cd $SRC/ffmpeg && \
-    ./configure --prefix=/usr --enable-shared --disable-static \
-        --disable-doc --disable-programs --disable-debug \
-        --cc=clang --cxx=clang++ && \
-    make -j$(nproc) && \
-    make install && \
-    ldconfig
-
 RUN git clone https://github.com/FFMS/ffms2 ffms2
 COPY build.sh $SRC/
 COPY *_fuzzer.cc $SRC/
