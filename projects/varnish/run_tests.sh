@@ -21,12 +21,12 @@ export ASAN_OPTIONS="detect_leaks=0"
 
 # Skip failing tests that failed in Docker container by temporarily moving them
 mkdir -p /tmp/skipped_tests
-mv bin/varnishtest/tests/c00057.vtc /tmp/skipped_tests/
-mv bin/varnishtest/tests/c00080.vtc /tmp/skipped_tests/
+mv bin/vinyltest/tests/c00057.vtc /tmp/skipped_tests/
+mv bin/vinyltest/tests/c00080.vtc /tmp/skipped_tests/
 
 # Run unit test
 make check -j$(nproc)
 
 # Restore the skipped tests for integrity check
-cp /tmp/skipped_tests/* bin/varnishtest/tests/
+cp /tmp/skipped_tests/* bin/vinyltest/tests/
 rm -rf /tmp/skipped_tests
