@@ -27,7 +27,7 @@ RUN python3 -m pip install --upgrade pip && python3 -m pip install packaging
 RUN python3 -m pip install -U meson ninja
 
 # Clone necessary repositories
-RUN git clone git://git.kernel.org/pub/scm/libs/ell/ell.git
+RUN git clone https://git.kernel.org/pub/scm/libs/ell/ell.git
 RUN git clone --depth 1 https://github.com/bluez/bluez bluez
 RUN git clone https://github.com/GNOME/glib && \
     cd glib && \
