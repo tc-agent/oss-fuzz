@@ -1,0 +1,7 @@
+if /bar/
+if !/xyzzy/
+/(elbereth)/	($1)
+!/(bogus)/	($1)
+!/find/		not found
+endif
+endif
