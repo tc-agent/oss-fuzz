@@ -62,9 +62,10 @@ void fuzz_json_locate_key(const uint8_t *data, size_t size) {
   const char *key_start;
   const char *key_end;
   int comma_pos;
+  json_engine_t je;
 
-  json_locate_key(fuzz_str, fuzz_str + size, fuzz_key, &key_start, &key_end,
-                  &comma_pos);
+  json_locate_key(&je, fuzz_str, fuzz_str + size, fuzz_key, &key_start,
+                  &key_end, &comma_pos);
 
   free(fuzz_str);
   free(fuzz_key);
