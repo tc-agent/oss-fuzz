@@ -12,7 +12,10 @@ limitations under the License.
 
 #include "dnsmasq.h"
 
-extern void fuzz_blockdata_cleanup();
+/* Reset the blockdata pool between fuzz runs. blockdata_init() resets the
+   free-list head and all counters, which is sufficient cleanup since
+   LeakSanitizer is disabled (detect_leaks=0) in the OSS-Fuzz build. */
+static void fuzz_blockdata_cleanup(void) { blockdata_init(); }
 
 // Simple garbage collector 
 #define GB_SIZE 100
@@ -31,10 +34,18 @@ void gb_init() {
 }
 
 void gb_cleanup() {
+  /* dnsmasq redefines free() as free_real() which unconditionally reads
+     daemon->log_malloc.  We must keep daemon valid until all other frees
+     are done, then free it last and null it out. */
+  void *d = (void *)daemon;
   for(int i = 0; i < GB_SIZE; i++) {
-    if (pointer_arr[i] != NULL) {
+    if (pointer_arr[i] != NULL && pointer_arr[i] != d) {
       free(pointer_arr[i]);
     }
+  }
+  if (d) {
+    free(d);
+    daemon = NULL;
   }
 }
 
