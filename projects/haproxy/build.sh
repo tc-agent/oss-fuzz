@@ -62,6 +62,21 @@ printf '\x01HTTP/1.1 100 Continue\r\n\r\n' > "$WORK/h1_seeds/resp_100"
 printf '\x01HTTP/1.1 204 No Content\r\n\r\n' > "$WORK/h1_seeds/resp_204"
 zip -j "$OUT/fuzz_h1_parse_seed_corpus.zip" "$WORK"/h1_seeds/*
 
+# Create seed corpus for HTTP utility fuzzer (fuzz_http).
+# The first byte selects which function group to exercise (selector % 7):
+#   0 = URI parsing      1 = Content-Length   2 = cookie parsing
+#   3 = header parsing   4 = misc utilities   5 = URL parameters
+#   6 = cookie value end
+mkdir -p "$WORK/http_seeds"
+printf '\x00http://example.com/path?q=1' > "$WORK/http_seeds/uri"
+printf '\x011234' > "$WORK/http_seeds/content_length"
+printf '\x02session=abc123; user=john' > "$WORK/http_seeds/cookie"
+printf '\x03Content-Type: application/json' > "$WORK/http_seeds/header"
+printf '\x04GET' > "$WORK/http_seeds/misc"
+printf '\x05key=value&foo=bar' > "$WORK/http_seeds/url_params"
+printf '\x06cookie=value; next=x' > "$WORK/http_seeds/cookie_value_end"
+zip -j "$OUT/fuzz_http_seed_corpus.zip" "$WORK"/http_seeds/*
+
 # build vtest for run_tests.sh
 cd $SRC/VTest2
 make vtest
