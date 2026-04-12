@@ -37,12 +37,16 @@
 #include <haproxy/h1.h>
 #include <haproxy/http-hdr.h>
 #include <haproxy/global.h>
+#include <haproxy/chunk.h>
 
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 
 #define MAX_HDR_NUM 101
+#define TRASH_BUF_SIZE 65536
+
+static int fuzz_initialized = 0;
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 	struct h1m h1m;
@@ -52,6 +56,23 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
 	if (size < 2)
 		return 0;
+
+	/* One-time init: initialize the trash buffer and HTTP global state.
+	 * This replicates the startup sequence that haproxy normally performs
+	 * (alloc_early_trash + alloc_trash_buffers_per_thread), which the fuzzer
+	 * bypasses.  The first call with first=1 mirrors alloc_early_trash(); the
+	 * second with first=0 also sets up the large/small trash pools. */
+	if (!fuzz_initialized) {
+		global.tune.bufsize = TRASH_BUF_SIZE;
+		global.tune.bufsize_large = TRASH_BUF_SIZE * 2;
+		global.tune.bufsize_small = 1024;
+		global.tune.max_http_hdr = MAX_HDR_NUM;
+		if (!init_trash_buffers(1))
+			return 0;
+		if (!init_trash_buffers(0))
+			return 0;
+		fuzz_initialized = 1;
+	}
 
 	/* Use first byte to select request vs response parsing */
 	int parse_response = data[0] & 1;
@@ -65,10 +86,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 		return 0;
 	memcpy(buf, data, size);
 	buf[size] = '\0';
-
-	/* Ensure global.tune.max_http_hdr is set */
-	if (global.tune.max_http_hdr == 0)
-		global.tune.max_http_hdr = MAX_HDR_NUM;
 
 	if (parse_response) {
 		h1m_init_res(&h1m);
