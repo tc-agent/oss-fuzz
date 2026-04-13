@@ -29,3 +29,19 @@ RUN git clone --depth 1 https://github.com/tmux/tmux.git
 RUN git clone --depth 1 https://github.com/tmux/tmux-fuzzing-corpus.git
 WORKDIR tmux
 COPY build.sh $SRC/
+
+# New harnesses not yet in upstream tmux/fuzz/
+COPY colour-fuzzer.c \
+     colour-fuzzer.options \
+     colour-fuzzer.dict \
+     key-string-fuzzer.c \
+     key-string-fuzzer.options \
+     key-string-fuzzer.dict \
+     $SRC/
+
+# Seed corpora for all non-input fuzzers
+COPY seeds/format-fuzzer/ $SRC/format-fuzzer-seeds/
+COPY seeds/style-fuzzer/ $SRC/style-fuzzer-seeds/
+COPY seeds/cmd-parse-fuzzer/ $SRC/cmd-parse-fuzzer-seeds/
+COPY seeds/colour-fuzzer/ $SRC/colour-fuzzer-seeds/
+COPY seeds/key-string-fuzzer/ $SRC/key-string-fuzzer-seeds/
