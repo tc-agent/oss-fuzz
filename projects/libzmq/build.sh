@@ -17,3 +17,32 @@
 ################################################################################
 
 ${SRC}/libzmq/builds/fuzz/ci_build.sh
+
+# Build additional in-process decoder harnesses.
+# After ci_build.sh, platform.hpp is generated in ${SRC}/libzmq/src/ and
+# the static libraries are installed under /tmp/zmq_install_dir/install_prefix/.
+ZMQINST=/tmp/zmq_install_dir/install_prefix
+
+for harness in ${SRC}/test_*_fuzzer.cpp; do
+    name=$(basename "${harness}" .cpp)
+    $CXX $CXXFLAGS $LIB_FUZZING_ENGINE \
+        -std=c++11 \
+        -I${SRC}/libzmq/src \
+        -I${SRC}/libzmq/include \
+        "${harness}" \
+        "${ZMQINST}/lib/libzmq.a" \
+        "${ZMQINST}/lib/libsodium.a" \
+        -lpthread \
+        -o "${OUT}/${name}"
+done
+
+# Generate seed corpora for the in-process decoder harnesses.
+SEED_TMP=$(mktemp -d)
+python3 "${SRC}/generate_seeds.py" "${SEED_TMP}"
+for seed_dir in "${SEED_TMP}"/*/; do
+    name=$(basename "${seed_dir}")
+    if [ -d "${seed_dir}" ] && [ "$(ls -A "${seed_dir}")" ]; then
+        zip -j "${OUT}/${name}_seed_corpus.zip" "${seed_dir}"/*
+    fi
+done
+rm -rf "${SEED_TMP}"

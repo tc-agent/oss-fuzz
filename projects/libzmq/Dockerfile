@@ -20,4 +20,7 @@ RUN git clone --depth 1 https://github.com/zeromq/libzmq.git
 RUN git clone --depth 1 https://github.com/zeromq/libzmq-fuzz-corpora.git
 RUN git clone --depth 1 -b stable https://github.com/jedisct1/libsodium.git
 WORKDIR libzmq
+COPY test_zmtp_decode_fuzzer.cpp test_zmtp_v1_decode_fuzzer.cpp \
+     test_ws_decode_fuzzer.cpp test_ws_decode_masked_fuzzer.cpp \
+     generate_seeds.py $SRC/
 COPY build.sh run_tests.sh $SRC/
