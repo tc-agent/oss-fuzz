@@ -18,6 +18,67 @@
 # Ensure libevent can be found
 export PKG_CONFIG_PATH="/usr/local/lib/"
 
+# Copy new harnesses into the source tree and register them in Makefile.am.
+cp -v "$SRC/colour-fuzzer.c" "$SRC/tmux/fuzz/"
+cp -v "$SRC/colour-fuzzer.options" "$SRC/tmux/fuzz/"
+cp -v "$SRC/colour-fuzzer.dict" "$SRC/tmux/fuzz/"
+cp -v "$SRC/key-string-fuzzer.c" "$SRC/tmux/fuzz/"
+cp -v "$SRC/key-string-fuzzer.options" "$SRC/tmux/fuzz/"
+cp -v "$SRC/key-string-fuzzer.dict" "$SRC/tmux/fuzz/"
+
+# Patch Makefile.am to add the new fuzz targets (idempotent: skip if already present).
+python3 - <<'PYEOF'
+with open("Makefile.am") as f:
+    content = f.read()
+
+if "fuzz/colour-fuzzer" in content:
+    print("Makefile.am already has colour-fuzzer — skipping patch")
+else:
+    old = """\
+check_PROGRAMS = \\
+\tfuzz/input-fuzzer \\
+\tfuzz/cmd-parse-fuzzer \\
+\tfuzz/format-fuzzer \\
+\tfuzz/style-fuzzer
+fuzz_input_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_input_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
+fuzz_cmd_parse_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_cmd_parse_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
+fuzz_format_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_format_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
+fuzz_style_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_style_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)"""
+
+    new = """\
+check_PROGRAMS = \\
+\tfuzz/input-fuzzer \\
+\tfuzz/cmd-parse-fuzzer \\
+\tfuzz/format-fuzzer \\
+\tfuzz/style-fuzzer \\
+\tfuzz/colour-fuzzer \\
+\tfuzz/key-string-fuzzer
+fuzz_input_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_input_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
+fuzz_cmd_parse_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_cmd_parse_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
+fuzz_format_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_format_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
+fuzz_style_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_style_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
+fuzz_colour_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_colour_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
+fuzz_key_string_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_key_string_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)"""
+
+    if old not in content:
+        raise SystemExit("Makefile.am patch anchor not found — upstream changed?")
+
+    content = content.replace(old, new, 1)
+    with open("Makefile.am", "w") as f:
+        f.write(content)
+    print("Makefile.am patched OK")
+PYEOF
+
 ./autogen.sh
 ./configure \
     --enable-fuzzing \
@@ -50,3 +111,15 @@ if [ ! -d "${WORK}/fuzzing_corpus" ]; then
     zip -q -j -r "${OUT}/input-fuzzer_seed_corpus.zip" \
         "${WORK}/fuzzing_corpus/"
 fi
+
+# Seed corpora for all non-input fuzzers
+zip -q -j -r "${OUT}/format-fuzzer_seed_corpus.zip" \
+    "${SRC}/format-fuzzer-seeds/"
+zip -q -j -r "${OUT}/style-fuzzer_seed_corpus.zip" \
+    "${SRC}/style-fuzzer-seeds/"
+zip -q -j -r "${OUT}/cmd-parse-fuzzer_seed_corpus.zip" \
+    "${SRC}/cmd-parse-fuzzer-seeds/"
+zip -q -j -r "${OUT}/colour-fuzzer_seed_corpus.zip" \
+    "${SRC}/colour-fuzzer-seeds/"
+zip -q -j -r "${OUT}/key-string-fuzzer_seed_corpus.zip" \
+    "${SRC}/key-string-fuzzer-seeds/"

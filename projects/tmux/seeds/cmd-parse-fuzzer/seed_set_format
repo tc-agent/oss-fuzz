@@ -1,0 +1,1 @@
+set-option -gw window-status-format "#{window_name}"
