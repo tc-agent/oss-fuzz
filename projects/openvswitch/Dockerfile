@@ -23,4 +23,7 @@ RUN git clone --depth 1 https://github.com/openvswitch/ovs.git openvswitch
 RUN git clone --depth 1 https://github.com/openvswitch/ovs-fuzzing-corpus.git \
     ovs-fuzzing-corpus
 WORKDIR openvswitch
-COPY run_tests.sh build.sh $SRC/
+COPY harnesses/ovsdb_schema_target.c harnesses/conntrack_target.c \
+     ovsdb_schema_target.options conntrack_target.options \
+     run_tests.sh build.sh $SRC/
+COPY seeds/ $SRC/seeds/
