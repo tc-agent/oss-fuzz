@@ -1,0 +1,11 @@
+/test/	match
+/^hello/	greeting
+/(foo)(bar)/	$1-$2
+if /true/	fodder
+/1/	1
+if /false/
+/2/	2
+endif
+/3/	3
+endif
+/a/!/b/	a!b

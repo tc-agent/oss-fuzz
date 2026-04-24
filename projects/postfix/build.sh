@@ -28,6 +28,18 @@ $CC $CFLAGS -DHAS_DEV_URANDOM -DSNAPSHOT -UUSE_DYNAMIC_LIBS -DDEF_SHLIB_DIR=\"no
 $CC $CFLAGS -DHAS_DEV_URANDOM -DSNAPSHOT -UUSE_DYNAMIC_LIBS -DDEF_SHLIB_DIR=\"no\" \
                -UUSE_DYNAMIC_MAPS -I. -I../../include -DNO_EAI -DDEF_SMTPUTF8_ENABLE=\"no\" \
                 -g -O -DLINUX4 -Wformat -Wno-comment -fno-common -c $SRC/fuzz_mime.c
+$CC $CFLAGS -DHAS_DEV_URANDOM -DSNAPSHOT -UUSE_DYNAMIC_LIBS -DDEF_SHLIB_DIR=\"no\" \
+               -UUSE_DYNAMIC_MAPS -I. -I../../include -DNO_EAI -DDEF_SMTPUTF8_ENABLE=\"no\" \
+                -g -O -DLINUX4 -Wformat -Wno-comment -fno-common -c $SRC/fuzz_haproxy.c
+
+# Compile fuzzers in src/util/ (for util library functions)
+cd ${BASE}/src/util
+$CC $CFLAGS -DHAS_DEV_URANDOM -DSNAPSHOT -UUSE_DYNAMIC_LIBS -DDEF_SHLIB_DIR=\"no\" \
+               -UUSE_DYNAMIC_MAPS -I. -I../../include -DNO_EAI -DDEF_SMTPUTF8_ENABLE=\"no\" \
+                -g -O -DLINUX4 -Wformat -Wno-comment -fno-common -c $SRC/fuzz_dict_regexp.c
+$CC $CFLAGS -DHAS_DEV_URANDOM -DSNAPSHOT -UUSE_DYNAMIC_LIBS -DDEF_SHLIB_DIR=\"no\" \
+               -UUSE_DYNAMIC_MAPS -I. -I../../include -DNO_EAI -DDEF_SMTPUTF8_ENABLE=\"no\" \
+                -g -O -DLINUX4 -Wformat -Wno-comment -fno-common -c $SRC/fuzz_dict_cidr.c
 
 # Link fuzzers
 cd ${BASE}
@@ -35,3 +47,16 @@ $CXX $CXXFLAGS $LIB_FUZZING_ENGINE ./src/global/fuzz_tok822.o \
   -o $OUT/fuzz_tok822 ./lib/libglobal.a ./lib/libutil.a
 $CXX $CXXFLAGS $LIB_FUZZING_ENGINE ./src/global/fuzz_mime.o -o $OUT/fuzz_mime \
   ./lib/libglobal.a ./lib/libutil.a -ldb
+$CXX $CXXFLAGS $LIB_FUZZING_ENGINE ./src/global/fuzz_haproxy.o \
+  -o $OUT/fuzz_haproxy ./lib/libglobal.a ./lib/libutil.a
+$CXX $CXXFLAGS $LIB_FUZZING_ENGINE ./src/util/fuzz_dict_regexp.o \
+  -o $OUT/fuzz_dict_regexp ./lib/libutil.a
+$CXX $CXXFLAGS $LIB_FUZZING_ENGINE ./src/util/fuzz_dict_cidr.o \
+  -o $OUT/fuzz_dict_cidr ./lib/libutil.a
+
+# Package seed corpora
+for harness in fuzz_dict_regexp fuzz_dict_cidr fuzz_haproxy; do
+  if [ -d "$SRC/seeds/${harness}" ] && ls "$SRC/seeds/${harness}"/* >/dev/null 2>&1; then
+    zip -j "$OUT/${harness}_seed_corpus.zip" "$SRC/seeds/${harness}"/*
+  fi
+done
