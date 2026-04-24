@@ -12,38 +12,37 @@ limitations under the License.
 
 #include "fuzz_header.h"
 
-/* 
- * Targets answer_auth
+/*
+ * Targets dhcp_reply (rfc2131.c) directly, bypassing the socket layer.
+ * dhcp_packet() calls recv_dhcp_packet() which calls recvmsg() — without a
+ * real socket that always fails immediately. Calling dhcp_reply() directly
+ * with crafted data exercises the full DHCP option parsing and reply logic.
  */
 void FuzzDhcp(const uint8_t **data2, size_t *size2) {
   const uint8_t *data = *data2;
   size_t size = *size2;
-  time_t now;
-  int pxe_fd = 0;
+  time_t now = 0;
 
-  struct iovec *dhpa = malloc(sizeof(struct iovec));
-  if (dhpa == NULL) return;
-
-  char *content = malloc(sizeof(struct dhcp_packet));
-  if (content == NULL) {
-    free(dhpa);
+  if (size < sizeof(struct dhcp_packet))
     return;
-  }
-  
-  dhpa->iov_base = content;
-  dhpa->iov_len = sizeof(struct dhcp_packet);
 
-  daemon->dhcp_packet = *dhpa;
+  void *packet_buf = malloc(size);
+  if (!packet_buf) return;
+  memcpy(packet_buf, data, size);
 
-  syscall_data = data;
-  syscall_size = size;
-  
-  dhcp_packet(now, pxe_fd);
+  daemon->dhcp_packet.iov_base = packet_buf;
+  daemon->dhcp_packet.iov_len = size;
 
-  // dnsmasq may change the iov_base if the buffer needs expansion.
-  // Do not free in that case, only free if the buffer stays that same.
+  char iface_name[IF_NAMESIZE] = "eth0";
+  int is_inform = 0;
+  struct in_addr fallback;
+  fallback.s_addr = 0;
+
+  dhcp_reply(daemon->dhcp, iface_name, 1, size, now, 0, 0,
+             &is_inform, 0, fallback, now, fallback);
+
   free(daemon->dhcp_packet.iov_base);
-  free(dhpa);
+  daemon->dhcp_packet.iov_base = NULL;
 }
 
 /*

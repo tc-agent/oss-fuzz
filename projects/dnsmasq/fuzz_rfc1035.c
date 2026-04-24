@@ -23,7 +23,6 @@ void FuzzExtractTheAddress(const uint8_t **data2, size_t *size2) {
   new_name = get_len_null_terminated(&data, &size, MAXDNAME);
   pointer_arr[pointer_idx++] = (void*)new_name;
 
-  int is_sign = get_int(&data, &size);
   int check_rebind = get_int(&data, &size);
   int secure =  get_int(&data, &size);
 
@@ -32,10 +31,9 @@ void FuzzExtractTheAddress(const uint8_t **data2, size_t *size2) {
     memset(new_data, 0, size);
     memcpy(new_data, data, size);
     pointer_arr[pointer_idx++] = (void*)new_data;
-    
-    time_t now; 
-    int doctored = 0;
-    extract_addresses((struct dns_header *)new_data, size, new_name, now, NULL, NULL, is_sign, check_rebind, 0, secure, &doctored);
+
+    time_t now;
+    extract_addresses((struct dns_header *)new_data, size, new_name, now, NULL, NULL, check_rebind, 0, secure);
   }
 }
 
@@ -61,7 +59,8 @@ void FuzzAnswerTheRequest(const uint8_t **data2, size_t *size2) {
     memcpy(new_data, data, size);
     pointer_arr[pointer_idx++] = (void*)new_data;
 
-    answer_request((struct dns_header *)new_data, new_data+size, size, local_addr, local_netmask, now, i1, i2, i3);
+    int stale = 0, filtered = 0;
+    answer_request((struct dns_header *)new_data, new_data+size, size, local_addr, local_netmask, now, i1, i2, i3, &stale, &filtered);
   }
 
 }
@@ -124,8 +123,8 @@ void FuzzExtractRequest(const uint8_t **data2, size_t *size2) {
     new_data[size] = '\0';
     pointer_arr[pointer_idx++] = (void*)new_data;
 
-    unsigned short typeb;
-    extract_request((struct dns_header *)new_data, size, new_name, &typeb);
+    unsigned short typeb, class2b;
+    extract_request((struct dns_header *)new_data, size, new_name, &typeb, &class2b);
   }
 }
 
