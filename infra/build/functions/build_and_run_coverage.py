@@ -132,14 +132,20 @@ def get_build_steps(  # pylint: disable=too-many-locals, too-many-arguments
           coverage_env,
       'args': [
           'bash', '-c',
-          ('for f in /corpus/*.zip; do unzip -q $f -d ${f%.*} || ('
-           'echo "Failed to unpack the corpus for $(basename ${f%.*}). '
-           'This usually means that corpus backup for a particular fuzz '
-           'target does not exist. If a fuzz target was added in the last '
-           '24 hours, please wait one more day. Otherwise, something is '
-           'wrong with the fuzz target or the infrastructure, and corpus '
-           'pruning task does not finish successfully." && exit 1'
-           '); done && coverage || (echo "' + failure_msg + '" && false)')
+          ('for f in /corpus/*.zip; do '
+           'target_name=$(basename ${f%.*}); '
+           'if ! unzip -q $f -d ${f%.*}; then '
+           'echo "Warning: failed to unpack corpus for $target_name '
+           '(backup may be missing or corrupt). '
+           'Trying seed corpus fallback."; '
+           'seed_zip="$OUT/${target_name}_seed_corpus.zip"; '
+           'if [ -f "$seed_zip" ]; then '
+           'unzip -q "$seed_zip" -d "${f%.*}" || '
+           'echo "Warning: seed corpus fallback also failed for $target_name; running on empty corpus."; '
+           'fi; '
+           'mkdir -p "${f%.*}"; '
+           'fi; '
+           'done && coverage || (echo "' + failure_msg + '" && false)')
       ],
       'volumes': [{
           'name': 'corpus',
