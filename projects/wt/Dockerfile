@@ -17,4 +17,6 @@ FROM gcr.io/oss-fuzz-base/base-builder
 RUN apt-get update && apt-get install -y libboost-all-dev cmake
 RUN git clone https://github.com/emweb/wt.git
 COPY build.sh $SRC/
+COPY fuzz-datetime.C fuzz-utils.C fuzz-xss.C $SRC/wt/fuzz/
+COPY seeds/ $SRC/seeds/
 WORKDIR $SRC/wt/

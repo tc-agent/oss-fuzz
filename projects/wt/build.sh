@@ -17,6 +17,18 @@
 
 export CXXFLAGS="$CFLAGS"
 
+# Register additional fuzz targets in the upstream fuzz/CMakeLists.txt
+cat >> $SRC/wt/fuzz/CMakeLists.txt << 'EOF'
+
+ADD_EXECUTABLE(fuzz-datetime fuzz-datetime.C)
+ADD_EXECUTABLE(fuzz-utils    fuzz-utils.C)
+ADD_EXECUTABLE(fuzz-xss      fuzz-xss.C)
+
+TARGET_LINK_LIBRARIES(fuzz-datetime PRIVATE wt $ENV{LIB_FUZZING_ENGINE})
+TARGET_LINK_LIBRARIES(fuzz-utils    PRIVATE wt $ENV{LIB_FUZZING_ENGINE})
+TARGET_LINK_LIBRARIES(fuzz-xss      PRIVATE wt $ENV{LIB_FUZZING_ENGINE})
+EOF
+
 mkdir -p mybuild
 
 pushd mybuild/
@@ -26,3 +38,7 @@ cp fuzz/fuzz-* $OUT/
 popd
 
 cp fuzz/*zip $OUT/
+
+for h in fuzz-datetime fuzz-utils fuzz-xss; do
+  zip -j $OUT/${h}_seed_corpus.zip $SRC/seeds/$h/*
+done
