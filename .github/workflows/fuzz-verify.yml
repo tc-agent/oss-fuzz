@@ -1,0 +1,179 @@
+# Template — injected into oss-fuzz fork branches by pr_server.py at PR submission time.
+# Not used directly in this repo. Injected alongside .github/actions/{collect-fuzz-stats,post-fuzz-report}/.
+name: Fuzz Verify
+on: [push]
+
+permissions:
+  # Default to read-only at the workflow level; the report job elevates to pull-requests:write.
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FUZZ_SECONDS: "300"
+
+jobs:
+  measure:
+    name: Measure (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: ${{ matrix.variant == 'baseline' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, current]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect project
+        id: detect
+        run: |
+          PROJECT=$(git diff --name-only origin/master...HEAD | grep '^projects/' | cut -d/ -f2 | sort -u | head -1)
+          if [ -z "$PROJECT" ]; then
+            echo "::error::No project changes detected"
+            exit 1
+          fi
+          echo "name=$PROJECT" >> "$GITHUB_OUTPUT"
+          echo "Project: $PROJECT"
+
+      - name: Resolve variant
+        id: variant
+        env:
+          PROJECT: ${{ steps.detect.outputs.name }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          if [ "$VARIANT" = "baseline" ]; then
+            SHA=$(git merge-base origin/master HEAD)
+            echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+            if git cat-file -e "$SHA:projects/$PROJECT/Dockerfile" 2>/dev/null; then
+              echo "has_project=true" >> "$GITHUB_OUTPUT"
+              echo "Baseline: $SHA (project exists at base)"
+              rm -rf "projects/$PROJECT"
+              git checkout "$SHA" -- "projects/$PROJECT"
+            else
+              echo "has_project=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::projects/$PROJECT not present at base ($SHA) — skipping baseline measurement"
+            fi
+          else
+            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo "has_project=true" >> "$GITHUB_OUTPUT"
+            echo "Current: $GITHUB_SHA"
+          fi
+
+      - name: Install oss-fuzz deps
+        if: steps.variant.outputs.has_project == 'true'
+        run: pip install -r infra/ci/requirements.txt 2>/dev/null || pip install docker
+
+      - name: Build image
+        if: steps.variant.outputs.has_project == 'true'
+        env:
+          PROJECT: ${{ steps.detect.outputs.name }}
+        run: echo n | python3 infra/helper.py build_image "$PROJECT"
+
+      - name: Build fuzzers
+        if: steps.variant.outputs.has_project == 'true'
+        env:
+          PROJECT: ${{ steps.detect.outputs.name }}
+        run: echo n | python3 infra/helper.py build_fuzzers --sanitizer address "$PROJECT"
+
+      - name: Fuzz
+        if: steps.variant.outputs.has_project == 'true'
+        env:
+          PROJECT: ${{ steps.detect.outputs.name }}
+        run: |
+          OUT="build/out/$PROJECT"
+
+          HARNESSES=""
+          for f in "$OUT"/*; do
+            [ -f "$f" ] && [ -x "$f" ] || continue
+            case "$(basename "$f")" in
+              *.options|*.dict|*_seed_corpus.zip|llvm-symbolizer) continue ;;
+            esac
+            HARNESSES="$HARNESSES $(basename "$f")"
+          done
+          HARNESSES=$(echo $HARNESSES | xargs)
+
+          if [ -z "$HARNESSES" ]; then
+            echo "::error::No harness binaries found in $OUT"
+            exit 1
+          fi
+
+          N=$(echo $HARNESSES | wc -w)
+          TIME_EACH=$(( FUZZ_SECONDS / N ))
+          [ "$TIME_EACH" -lt 30 ] && TIME_EACH=30
+          echo "Harnesses ($N): $HARNESSES — ${TIME_EACH}s each"
+
+          for h in $HARNESSES; do
+            echo "::group::$h"
+            mkdir -p "corpus/$PROJECT/$h"
+            timeout $((TIME_EACH + 60)) python3 infra/helper.py run_fuzzer \
+              --corpus-dir "$(pwd)/corpus/$PROJECT/$h" \
+              "$PROJECT" "$h" -- \
+              "-max_total_time=$TIME_EACH" 2>&1 || true
+            echo "Corpus: $(find "corpus/$PROJECT/$h" -type f | wc -l) files"
+            echo "::endgroup::"
+          done
+
+      - name: Coverage
+        if: steps.variant.outputs.has_project == 'true'
+        env:
+          PROJECT: ${{ steps.detect.outputs.name }}
+        run: |
+          echo n | python3 infra/helper.py build_fuzzers --sanitizer coverage "$PROJECT"
+
+          mkdir -p "build/corpus"
+          ln -sfn "$(pwd)/corpus/$PROJECT" "build/corpus/$PROJECT"
+
+          python3 infra/helper.py coverage \
+            --no-corpus-download --no-serve \
+            "$PROJECT" 2>&1 || true
+
+      - name: Collect stats
+        if: always()
+        uses: ./.github/actions/collect-fuzz-stats
+        with:
+          project: ${{ steps.detect.outputs.name }}
+          variant: ${{ matrix.variant }}
+          sha: ${{ steps.variant.outputs.sha }}
+          has_project: ${{ steps.variant.outputs.has_project }}
+          out_base: build/out
+
+      - name: Upload stats
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stats-${{ matrix.variant }}
+          path: stats-${{ matrix.variant }}/
+          if-no-files-found: error
+
+      - name: Upload coverage report
+        if: always() && steps.variant.outputs.has_project == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report-${{ matrix.variant }}
+          path: build/out/*coverage*/report/
+          if-no-files-found: ignore
+
+  report:
+    name: Report
+    needs: [measure]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # post sticky fuzz-verify comment
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions/post-fuzz-report
+      - uses: ./.github/actions/post-fuzz-report
+        with:
+          footer: generic
+          fuzz_seconds: ${{ env.FUZZ_SECONDS }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}

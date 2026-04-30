@@ -1,0 +1,1 @@
+Digest realm="example.com",nonce="abc123",username="alice",uri="/register",response="deadbeef01234567"

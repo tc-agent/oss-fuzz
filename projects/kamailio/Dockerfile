@@ -20,3 +20,5 @@ RUN git clone https://github.com/kamailio/kamailio
 
 WORKDIR $SRC
 COPY build.sh $SRC/
+COPY harnesses/ $SRC/harnesses/
+COPY seeds/ $SRC/seeds/
