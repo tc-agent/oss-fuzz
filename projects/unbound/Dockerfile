@@ -22,4 +22,6 @@ COPY fuzz_1.c .
 COPY fuzz_2.c .
 COPY fuzz_3.c .
 COPY fuzz_4.c .
+COPY fuzz_config.c .
+COPY fuzz_zonefile.c .
 COPY run_tests.sh build.sh $SRC/
