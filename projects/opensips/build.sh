@@ -16,3 +16,5 @@
 ################################################################################
 
 bash -x ./test/fuzz/oss-fuzz-build.sh
+
+cp $SRC/fuzz_uri_parser.options $OUT/
