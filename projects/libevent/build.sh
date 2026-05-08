@@ -52,6 +52,45 @@ if [ "$FUZZING_ENGINE" != 'afl' ]; then
   cp $SRC/ws_fuzzer.dict $OUT/ws_fuzzer.dict
 fi
 
+# Seed corpora for the harnesses added/refactored in #15465. Without these,
+# ClusterFuzz starts the new fuzzers from an empty corpus and corpus pruning
+# can take several days to produce the backups consumed by the coverage build.
+seed_dir=$WORK/libevent_seeds
+mkdir -p $seed_dir/dns_fuzzer $seed_dir/evtag_fuzzer $seed_dir/http_message_fuzzer \
+  $seed_dir/listener_fuzzer $seed_dir/ws_fuzzer
+
+# dns_fuzzer: uses FuzzedDataProvider which consumes from the end. The trailing
+# byte selects the mode (mod 3): 0=config, 1=server, 2=client. Harness rejects size < 10.
+printf 'nameserver 127.0.0.1\n\x00\x00\x00\x00\x00' > $seed_dir/dns_fuzzer/config_mode
+printf '\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01\x00\x00\x00\x00\x01' \
+  > $seed_dir/dns_fuzzer/server_query
+printf '\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02' > $seed_dir/dns_fuzzer/client_basic
+
+# listener_fuzzer: first 4 bytes are listener flags.
+printf '\x00\x00\x00\x00' > $seed_dir/listener_fuzzer/no_flags
+printf '\x06\x00\x00\x00' > $seed_dir/listener_fuzzer/close_on_free_exec
+
+# evtag_fuzzer: byte 0 = ops mask, byte 1 = need_tag, then payload (size>=4).
+printf '\xff\x01\x00\x00\x00\x04test' > $seed_dir/evtag_fuzzer/all_ops
+printf '\x80\x00\x00\x00\x00\x00\x00\x00' > $seed_dir/evtag_fuzzer/header_only
+
+# ws_fuzzer: WebSocket frames written to the peer bufferevent.
+printf '\x81\x00' > $seed_dir/ws_fuzzer/text_empty
+printf '\x82\x05hello' > $seed_dir/ws_fuzzer/binary_short
+printf '\x88\x00' > $seed_dir/ws_fuzzer/close_empty
+printf '\x89\x00' > $seed_dir/ws_fuzzer/ping_empty
+
+# http_message_fuzzer: first byte = mode bitmask, second = extra (size>=6).
+printf '\x01\x00GET / HTTP/1.1\r\nHost: x\r\n\r\n' > $seed_dir/http_message_fuzzer/req_get
+printf '\x02\x00HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n' > $seed_dir/http_message_fuzzer/resp_200
+printf '\x10\x00/path?a=1&b=hello%%20world' > $seed_dir/http_message_fuzzer/uri_query
+printf '\x40\x00X-Foo: bar\nHost: example\n' > $seed_dir/http_message_fuzzer/headers
+
+for target in dns_fuzzer evtag_fuzzer http_message_fuzzer listener_fuzzer ws_fuzzer; do
+  rm -f $OUT/${target}_seed_corpus.zip
+  (cd $seed_dir/$target && zip -q $OUT/${target}_seed_corpus.zip *)
+done
+
 # Build the project tests for Chronos
 mkdir -p $SRC/libevent/build-tests
 cd $SRC/libevent/build-tests
