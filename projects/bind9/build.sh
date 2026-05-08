@@ -22,6 +22,8 @@ git apply  --ignore-space-change --ignore-whitespace $SRC/patch.diff
 
 # Use valid value for -Dfuzzing (enabled/disabled/auto)
 meson setup build -Dfuzzing=enabled -Dcmocka=enabled \
+  -Dfuzzing-backend=oss-fuzz -Doss-fuzz-args="$LIB_FUZZING_ENGINE" \
+  -Db_lundef=false \
   -Dc_link_args="$CFLAGS" -Dcpp_link_args="$CXXFLAGS" \
   -Dc_args="$CFLAGS" -Dcpp_args="$CXXFLAGS" \
   -Ddefault_library=static -Dprefer_static=true \
