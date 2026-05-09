@@ -151,7 +151,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
       tt.actual_name = gb_get_random_string();
       r6.iface = gb_get_random_string();
       r6.flags = fuzz_randomizer_get_int(0, 0xfffff);
-      r6.netbits = fuzz_randomizer_get_int(0, 0xfffff);
+      r6.netbits = fuzz_randomizer_get_int(0, 128);
       r6.metric = fuzz_randomizer_get_int(0, 0xfffff);
 
       r6.next = NULL;
@@ -195,6 +195,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
   if (route_list_inited) {
     gc_free(&rl.gc);
+  }
+  if (route_list_ipv6_inited) {
+    gc_free(&rl6.gc);
   }
   env_set_destroy(c.es);
   context_gc_free(&c);
