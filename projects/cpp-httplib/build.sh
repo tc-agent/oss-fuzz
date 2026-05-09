@@ -18,6 +18,13 @@
 # Build fuzz targets specified  in test/Makefile.
 cd test/fuzzing && make -j$(nproc) all
 
+# Upstream Makefile only zips seed corpora for server_fuzzer and client_fuzzer.
+# Provide the missing zips so url_parser_fuzzer and header_parser_fuzzer have
+# a non-empty corpus when ClusterFuzz backups are unavailable.
+for fuzzer in url_parser_fuzzer header_parser_fuzzer; do
+  [ -f "${fuzzer}_seed_corpus.zip" ] || zip -q -r "${fuzzer}_seed_corpus.zip" corpus
+done
+
 # Copy the fuzzer executables, zip-ed corpora, option and dictionary files to $OUT.
 find . -name '*_fuzzer' -exec cp -v '{}' $OUT ';'          # Copy fuzz-target.
 find . -name '*_fuzzer.dict' -exec cp -v '{}' $OUT ';'     # Copy dictionaries.
