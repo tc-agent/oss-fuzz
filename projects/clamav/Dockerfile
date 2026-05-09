@@ -24,8 +24,15 @@ RUN apt-get update && apt-get install -y \
 # We need the latest toolchain to reliably build clamav.
 # oss-fuzz requires nightly for the -Z option, so we use that as well.
 #
-RUN rustup update nightly
 ENV RUSTUP_TOOLCHAIN=nightly-x86_64-unknown-linux-gnu
+RUN rustup update nightly && rustup default nightly && rustup component add rust-src
+
+# clamav has FUZZING_LANGUAGE=c++ but links Rust libraries. base-builder/compile
+# only stages Rust stdlib source under /rustc/<hash>/ when FUZZING_LANGUAGE=rust,
+# so do it here so coverage reports can resolve Rust source paths.
+RUN rustch=$(rustc --version --verbose | grep commit-hash | cut -d' ' -f2) && \
+    mkdir -p /rustc/$rustch/ && \
+    cp -r /rust/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/ /rustc/$rustch/
 
 #
 # Build static libs for dependencies
