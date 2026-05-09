@@ -26,6 +26,8 @@ RUN git clone --depth 1 https://github.com/git/git git
 RUN git clone --depth 1 https://github.com/madler/zlib
 WORKDIR $SRC/git
 COPY run_tests.sh build.sh $SRC/
+COPY fuzz-parse-commit.c fuzz-parse-tag.c fuzz-tree-walk.c fuzz-fsck.c fuzz-refname.c $SRC/
+COPY seeds $SRC/seeds
 # This is to fix Fuzz Introspector build by using LLVM old pass manager
 # re https://github.com/ossf/fuzz-introspector/issues/305
 ENV OLD_LLVMPASS=1

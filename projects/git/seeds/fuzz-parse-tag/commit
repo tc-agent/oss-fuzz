@@ -1,0 +1,6 @@
+object 0000000000000000000000000000000000000000
+type commit
+tag v1.0
+tagger A U Thor <a@u.example> 1700000000 +0000
+
+release v1.0
