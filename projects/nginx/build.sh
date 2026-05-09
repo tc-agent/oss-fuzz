@@ -31,3 +31,17 @@ make -f objs/Makefile fuzzers
 
 cp objs/*_fuzzer $OUT/
 cp $SRC/fuzz/*.dict $OUT/
+
+# Generate seed corpus for proxy_protocol_fuzzer.
+pp_seed_dir=$(mktemp -d)
+printf 'PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\n' > "$pp_seed_dir/v1_tcp4"
+printf 'PROXY TCP6 2001:db8::1 2001:db8::2 1234 5678\r\n' > "$pp_seed_dir/v1_tcp6"
+printf 'PROXY UNKNOWN\r\n' > "$pp_seed_dir/v1_unknown"
+# v2: signature + ver/cmd (PROXY) + AF_INET/STREAM + len(12) + src/dst addrs/ports.
+printf '\x0d\x0a\x0d\x0a\x00\x0d\x0aQUIT\x0a\x21\x11\x00\x0c\xc0\xa8\x00\x01\xc0\xa8\x00\x0b\xdc\x04\x01\xbb' \
+    > "$pp_seed_dir/v2_tcp4"
+# v2 with TLV (alpn=h2): base 28 bytes + TLV {type=0x01, len=2, "h2"} = 33; len = 17.
+printf '\x0d\x0a\x0d\x0a\x00\x0d\x0aQUIT\x0a\x21\x11\x00\x11\xc0\xa8\x00\x01\xc0\xa8\x00\x0b\xdc\x04\x01\xbb\x01\x00\x02h2' \
+    > "$pp_seed_dir/v2_tcp4_alpn"
+zip -j -q "$OUT/proxy_protocol_fuzzer_seed_corpus.zip" "$pp_seed_dir"/*
+rm -rf "$pp_seed_dir"
