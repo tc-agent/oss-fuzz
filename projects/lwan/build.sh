@@ -21,6 +21,12 @@ sed -i 's/static struct coro_switcher switcher;/static coro_context switcher;/' 
 mkdir -p $WORK/lwan
 cd $WORK/lwan
 
+# Disable Landlock support: the base-builder ships kernel 6.8 headers, which
+# lack symbols (LANDLOCK_ACCESS_FS_IOCTL_DEV, LANDLOCK_SCOPE_*, scoped struct
+# member) that lwan-straitjacket.c uses unconditionally under LWAN_HAVE_LANDLOCK.
+# The fuzz harnesses don't exercise the sandboxing code path.
+sed -i '/^find_path(LANDLOCK_HEADER /,/^endif ()/d' $SRC/lwan/CMakeLists.txt
+
 cmake -GNinja \
 	-DCMAKE_BUILD_TYPE=Debug \
 	-DCMAKE_C_COMPILER="${CC}" \
