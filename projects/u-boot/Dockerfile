@@ -27,8 +27,7 @@ RUN apt-get update && apt-get install -y \
 RUN pip3 install jsonschema jinja2
 RUN git clone --depth 1 https://github.com/u-boot/u-boot.git $SRC/u-boot
 WORKDIR $SRC/u-boot
-COPY efi_load_image.c $SRC/u-boot/test/fuzz/
-COPY fit_image_load.c image_decomp.c $SRC/u-boot/test/fuzz/
-COPY btrfs.c $SRC/u-boot/test/fuzz/
+COPY efi_load_image.c fit_image_load.c image_decomp.c fuzz_fs.c $SRC/
 COPY oss-fuzz.patch $SRC/
 COPY build.sh $SRC/
+COPY seeds/fuzz_fs $SRC/seeds_fuzz_fs/
