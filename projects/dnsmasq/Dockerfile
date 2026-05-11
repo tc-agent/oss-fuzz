@@ -23,4 +23,5 @@ COPY fuzz*.c $SRC/
 COPY fuzz*.cc $SRC/
 COPY fuzz*.h $SRC/
 
-COPY fuzz_patch.patch $SRC/
+COPY scripts $SRC/scripts
+COPY fuzz_*.options $SRC/

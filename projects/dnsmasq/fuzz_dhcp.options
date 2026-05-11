@@ -1,0 +1,5 @@
+[asan]
+detect_leaks = 0
+
+[libfuzzer]
+detect_leaks = 0

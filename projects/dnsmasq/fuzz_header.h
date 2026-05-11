@@ -12,7 +12,7 @@ limitations under the License.
 
 #include "dnsmasq.h"
 
-extern void fuzz_blockdata_cleanup();
+static void fuzz_blockdata_cleanup(void) { blockdata_init(); }
 
 // Simple garbage collector 
 #define GB_SIZE 100
@@ -31,11 +31,13 @@ void gb_init() {
 }
 
 void gb_cleanup() {
+  void *d = (void *)daemon;
   for(int i = 0; i < GB_SIZE; i++) {
-    if (pointer_arr[i] != NULL) {
+    if (pointer_arr[i] != NULL && pointer_arr[i] != d) {
       free(pointer_arr[i]);
     }
   }
+  if (d) { free(d); daemon = NULL; }
 }
 
 char *get_len_null_terminated(const uint8_t **data, size_t *size, size_t to_get) {
@@ -51,6 +53,7 @@ char *get_len_null_terminated(const uint8_t **data, size_t *size, size_t to_get)
   *size -= to_get;
   return new_s;
 }
+
 
 char *get_null_terminated(const uint8_t **data, size_t *size) {
 #define STR_SIZE 75
@@ -79,6 +82,13 @@ char *gb_get_null_terminated(const uint8_t **data, size_t *size) {
   if (nstr == NULL) {
     return NULL;
   }
+  /* These strings flow into daemon-> linked-list fields (cnames, mxnames,
+     txt, rr, naptr, auth_zones, etc.) that downstream code iterates via
+     C-string helpers; those helpers don't tolerate a zero-length C string.
+     A leading-NUL fuzz input is rare (~1/256) so the bias on init_daemon
+     fields is negligible. The unscoped get_len_null_terminated() helper
+     used by per-harness argument strings remains unbiased. */
+  if (nstr[0] == '\0') nstr[0] = 'a';
   pointer_arr[pointer_idx++] = (void*)nstr;
   return nstr;
 }
@@ -117,116 +127,6 @@ int get_int(const uint8_t **data, size_t *size) {
 }
 // end simple garbage collector.
 
-const uint8_t *syscall_data = NULL;
-size_t syscall_size = 0;
-
-
-int fuzz_ioctl(int fd, unsigned long request, void *arg) {
-  int fd2 = fd;
-  unsigned long request2 = request;
-  void *arg_ptr = arg;
-
-  // SIOCGSTAMP
-  if (request == SIOCGSTAMP) {
-    struct timeval *tv = (struct timeval*)arg_ptr;
-    if (tv == NULL) {
-      return 0;
-    }
-
-    char *rand_tv = gb_get_random_data(&syscall_data, &syscall_size, sizeof(struct timeval));
-    if (rand_tv == NULL) {
-      return -1;
-    }
-
-    memcpy(tv, rand_tv, sizeof(struct timeval));
-    return 0;
-  }
-
-  if (request == SIOCGIFNAME) {
-    //printf("We got a SIOCGIFNAME\n");
-    struct ifreq *ifr = (struct ifreq*)arg_ptr;
-    if (ifr == NULL) {
-      return -1;
-    }
-    for (int i = 0; i < IF_NAMESIZE; i++) {
-      if (syscall_size > 0 && syscall_data != NULL) {
-        ifr->ifr_name[i] = (char)*syscall_data;
-        syscall_data += 1;
-        syscall_size -= 1;
-      }
-      else {
-        ifr->ifr_name[i] = 'A';
-      }
-    }
-    ifr->ifr_name[IF_NAMESIZE-1] = '\0';
-    return 0;
-    //return -1;
-  }
-  if (request == SIOCGIFFLAGS) {
-    return 0;
-  }
-  if (request == SIOCGIFADDR) {
-    return 0;
-  }
-
-  // 
-  int retval = ioctl(fd2, request2, arg_ptr); 
-  return retval;
-}
-
-
-// Sysytem call wrappers
-static char v = 0;
-ssize_t fuzz_recvmsg(int sockfd, struct msghdr *msg, int flags) {
-  
-  struct iovec *target = msg->msg_iov;
-
-  //printf("recvmsg 1 \n");
-  if (syscall_size > 1) {
-    char r = *syscall_data;
-    syscall_data += 1;
-    syscall_size -= 1;
-
-    if (r == 12) {
-      //printf("recvmsg 2\n");
-      return -1;
-    }
-  }
-
-  int j = 0;
-  if (msg->msg_control != NULL) {
-    for (;j < CMSG_SPACE(sizeof(struct in_pktinfo)); j++)
-    {
-      if (syscall_size > 0 && syscall_data != NULL) {
-        ((char*)msg->msg_control)[j] = *syscall_data;
-        syscall_data += 1;
-        syscall_size -= 1;
-      }
-      else {
-        ((char*)msg->msg_control)[j] = 'A';
-      }
-    }
-  }
-
-  int i = 0;
-  for (; i < target->iov_len; i++) {
-    if (syscall_size > 0 && syscall_data != NULL) {
-      ((char*)target->iov_base)[i] = *syscall_data;
-      syscall_data += 1;
-      syscall_size -= 1;
-    }
-    else {
-      ((char*)target->iov_base)[i] = 'A';
-    }
-  }
-
-  if (msg->msg_namelen > 0) {
-    memset(msg->msg_name, 0, msg->msg_namelen);
-  }
-
-  return i;
-}
-
 
 // dnsmasq specific stuff
 int init_daemon(const uint8_t **data2, size_t *size2) {
@@ -247,9 +147,17 @@ int init_daemon(const uint8_t **data2, size_t *size2) {
   daemon->local_ttl = get_int(&data, &size);
   daemon->min_cache_ttl = get_int(&data, &size);
 
-  // daemon->namebuff.
-  char *daemon_namebuff = gb_get_len_null_terminated(&data, &size, MAXDNAME);
+  // daemon->namebuff and workspacename. Allocated larger than MAXDNAME
+  // because extract_name can write 2 bytes per character via NAME_ESCAPE.
+  char *daemon_namebuff = gb_alloc_data(MAXDNAME * 4);
+  CLEAN_IF_NULL(daemon_namebuff)
   daemon->namebuff = daemon_namebuff;
+  char *daemon_workspacename = gb_alloc_data(MAXDNAME * 4);
+  CLEAN_IF_NULL(daemon_workspacename)
+  daemon->workspacename = daemon_workspacename;
+  /* skip MAXDNAME bytes of fuzz input that the original code consumed,
+     keep the corpus byte stream aligned. */
+  if (size >= MAXDNAME) { data += MAXDNAME; size -= MAXDNAME; }
 
   // daemon->naptr
   struct naptr *naptr_ptr = (struct naptr*)gb_alloc_data(sizeof(struct naptr));
@@ -522,6 +430,7 @@ int init_daemon(const uint8_t **data2, size_t *size2) {
   dhcp_c_netid->net = dhcp_netid_net;
   dhcp_c->filter = dhcp_c_netid;
   dhcp_c->template_interface = dhcp_c_temp_in;
+  if (dhcp_c->prefix < 0 || dhcp_c->prefix > 32) dhcp_c->prefix = 24;
 
   daemon->dhcp = dhcp_c;
 
@@ -544,6 +453,9 @@ int init_daemon(const uint8_t **data2, size_t *size2) {
   dhcp6_c_netid->net = dhcp6_netid_net;
   dhcp6_c->filter = dhcp6_c_netid;
   dhcp6_c->template_interface = dhcp6_c_temp_in;
+  /* prefix and prefixlen come from gb_get_random_data; clamp to a sane
+     IPv6 range so is_same_net6 doesn't memcmp with a negative size. */
+  if (dhcp6_c->prefix < 0 || dhcp6_c->prefix > 128) dhcp6_c->prefix = 64;
 
   daemon->dhcp6 = dhcp6_c;
 

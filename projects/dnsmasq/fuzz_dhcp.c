@@ -12,54 +12,55 @@ limitations under the License.
 
 #include "fuzz_header.h"
 
-/* 
- * Targets answer_auth
+/*
+ * Targets dhcp_reply directly. dhcp_packet() does a blocking recvmsg()
+ * on a real socket which is unusable inside libFuzzer.
  */
 void FuzzDhcp(const uint8_t **data2, size_t *size2) {
   const uint8_t *data = *data2;
   size_t size = *size2;
-  time_t now;
-  int pxe_fd = 0;
 
-  struct iovec *dhpa = malloc(sizeof(struct iovec));
-  if (dhpa == NULL) return;
-
-  char *content = malloc(sizeof(struct dhcp_packet));
-  if (content == NULL) {
-    free(dhpa);
+  if (size < sizeof(struct dhcp_packet) + 8)
     return;
-  }
-  
-  dhpa->iov_base = content;
-  dhpa->iov_len = sizeof(struct dhcp_packet);
 
-  daemon->dhcp_packet = *dhpa;
+  size_t buf_sz = sizeof(struct dhcp_packet) * 2;
+  char *buf = (char *)malloc(buf_sz);
+  if (!buf) return;
+  memset(buf, 0, buf_sz);
 
-  syscall_data = data;
-  syscall_size = size;
-  
-  dhcp_packet(now, pxe_fd);
+  size_t copy_sz = size > sizeof(struct dhcp_packet) ? sizeof(struct dhcp_packet) : size;
+  memcpy(buf, data, copy_sz);
 
-  // dnsmasq may change the iov_base if the buffer needs expansion.
-  // Do not free in that case, only free if the buffer stays that same.
+  daemon->dhcp_packet.iov_base = buf;
+  daemon->dhcp_packet.iov_len = buf_sz;
+
+  int int_index = 0;
+  time_t now = 0;
+  int unicast_dest = 0, loopback = 0, is_inform = 0;
+  struct in_addr fallback;
+  struct in_addr leasequery_source;
+  memset(&fallback, 0, sizeof(fallback));
+  memset(&leasequery_source, 0, sizeof(leasequery_source));
+
+  dhcp_reply(daemon->dhcp, (char *)"lo", int_index, copy_sz, now,
+             unicast_dest, loopback, &is_inform, 0, fallback, now,
+             leasequery_source);
+
   free(daemon->dhcp_packet.iov_base);
-  free(dhpa);
+  daemon->dhcp_packet.iov_base = NULL;
 }
 
 /*
  * Fuzzer entrypoint.
- */ 
+ */
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   daemon = NULL;
   if (size < 1) {
     return 0;
   }
 
-  // Initialize mini garbage collector
   gb_init();
 
-  // Get a value we can use to decide which target to hit.
-  int i = (int)data[0];
   data += 1;
   size -= 1;
 
@@ -69,13 +70,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     cache_init();
     blockdata_init();
 
-		FuzzDhcp(&data, &size);
+    FuzzDhcp(&data, &size);
 
     cache_start_insert();
     fuzz_blockdata_cleanup();
   }
 
-  // Free data in mini garbage collector.
   gb_cleanup();
   return 0;
 }
