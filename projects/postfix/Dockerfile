@@ -19,4 +19,4 @@ RUN apt-get update && apt-get install -y make autoconf automake libtool libdb-de
 RUN git clone --depth=1 https://github.com/vdukhovni/postfix postfix
 WORKDIR postfix
 COPY build.sh $SRC/
-COPY *.c $SRC/
+COPY harnesses/ $SRC/harnesses/
