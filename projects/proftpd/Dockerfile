@@ -20,3 +20,9 @@ RUN apt-get update && apt-get install -y make autoconf automake libtool \
 RUN git clone --depth 1 https://github.com/proftpd/proftpd
 WORKDIR proftpd
 COPY build.sh $SRC/
+COPY netacl_fuzzer.c logfmt_fuzzer.c ftpaccess_fuzzer.c cmd_fuzzer.c $SRC/
+COPY ftpaccess_fuzzer.dict $SRC/
+COPY netacl_seeds $SRC/netacl_seeds
+COPY logfmt_seeds $SRC/logfmt_seeds
+COPY ftpaccess_seeds $SRC/ftpaccess_seeds
+COPY cmd_seeds $SRC/cmd_seeds

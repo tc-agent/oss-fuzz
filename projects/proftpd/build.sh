@@ -17,3 +17,22 @@
 
 cp tests/fuzzing/json_fuzzer.c $SRC/fuzzer.c
 tests/fuzzing/oss_fuzz_build.sh
+
+NEW_CC_FLAG="${CC} ${CFLAGS} -DHAVE_CONFIG_H -DLINUX -I. -I./include"
+
+for harness in netacl_fuzzer logfmt_fuzzer ftpaccess_fuzzer cmd_fuzzer; do
+  $NEW_CC_FLAG -c $SRC/${harness}.c -o ${harness}.o
+  $CC $CXXFLAGS $LIB_FUZZING_ENGINE ${harness}.o -o $OUT/${harness} \
+    src/scoreboard.o \
+    lib/prbase.a \
+    fuzz_lib.a \
+    -L/src/proftpd/lib \
+    -lcrypt -pthread
+done
+
+zip -j $OUT/netacl_fuzzer_seed_corpus.zip $SRC/netacl_seeds/*
+zip -j $OUT/logfmt_fuzzer_seed_corpus.zip $SRC/logfmt_seeds/*
+zip -j $OUT/ftpaccess_fuzzer_seed_corpus.zip $SRC/ftpaccess_seeds/*
+zip -j $OUT/cmd_fuzzer_seed_corpus.zip $SRC/cmd_seeds/*
+
+cp $SRC/ftpaccess_fuzzer.dict $OUT/ftpaccess_fuzzer.dict
