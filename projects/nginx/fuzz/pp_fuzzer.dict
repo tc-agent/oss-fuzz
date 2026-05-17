@@ -1,0 +1,32 @@
+# PROXY protocol v1 magic + minimal v1 examples
+"PROXY "
+"TCP4 "
+"TCP6 "
+"UNKNOWN"
+"\x0d\x0a"
+"PROXY TCP4 1.1.1.1 2.2.2.2 80 81\x0d\x0a"
+"PROXY TCP6 ::1 ::1 80 81\x0d\x0a"
+
+# PROXY protocol v2 magic ("\r\n\r\n\0\r\nQUIT\n")
+"\x0d\x0a\x0d\x0a\x00\x0d\x0aQUIT\x0a"
+
+# v2 TLV type bytes (PP2_TYPE_ALPN/AUTHORITY/CRC32C/NOOP/UNIQUE_ID/SSL/...)
+"\x01"
+"\x02"
+"\x03"
+"\x04"
+"\x05"
+"\x20"
+"\x21"
+"\x22"
+"\x23"
+"\x24"
+"\x25"
+"\x30"
+"\xea"
+
+# v2 family/protocol bytes
+"\x11"
+"\x12"
+"\x21"
+"\x22"

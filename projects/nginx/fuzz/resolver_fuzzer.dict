@@ -1,0 +1,44 @@
+# DNS header: id(2) flags(2) qdcount(2) ancount(2) nscount(2) arcount(2)
+# Standard query response, no error: flags = 0x8000
+"\x80\x00"
+# Standard query response, NOERROR with RD/RA: flags = 0x8180
+"\x81\x80"
+# Truncated response: flags = 0x8200
+"\x82\x00"
+# Response with NXDOMAIN (rcode=3)
+"\x81\x83"
+# Response with FORMERR (rcode=1)
+"\x80\x01"
+# Response with SERVFAIL (rcode=2)
+"\x80\x02"
+
+# QTYPEs (big-endian)
+"\x00\x01"
+"\x00\x05"
+"\x00\x0c"
+"\x00\x0f"
+"\x00\x10"
+"\x00\x1c"
+"\x00\x21"
+
+# QCLASS IN
+"\x00\x01"
+
+# Compression pointer (top 2 bits = 11)
+"\xc0\x0c"
+"\xc0\x00"
+
+# Common labels (length-prefixed)
+"\x03www"
+"\x07example"
+"\x03com"
+"\x03org"
+"\x03net"
+"\x00"
+
+# Terminator
+"\x00"
+
+# Common TTLs
+"\x00\x00\x00\x3c"
+"\x00\x00\x01\x2c"
