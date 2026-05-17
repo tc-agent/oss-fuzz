@@ -199,5 +199,32 @@ rm -f $OUT/table_foreachi_test* \
       $OUT/builtin_getfenv_test* \
       $OUT/string_buffer_encode_test*
 
+# WARNING: this DISABLES PRODUCTION FUZZING of the 5 utf8_*_test
+# Lua-API targets, not just a coverage report. It runs only in the
+# address build (the script exits earlier for SANITIZER=coverage), so
+# the removed binaries are absent from $OUT, hence from
+# targets.list.address -- the list ClusterFuzz fuzzes AND the list the
+# coverage runner reads to populate /corpus/*.zip.
+#
+# Why it is still necessary: the coverage runner does
+#   for f in /corpus/*.zip; do unzip -q $f ... || (echo ...; exit 1); done && coverage
+# where the `(... exit 1)` subshell does NOT abort the loop, so the
+# loop's status is the LAST iteration's unzip. ClusterFuzz corpus
+# backups for the luzer targets are currently 0-byte (a cloud
+# corpus-pruning bug, ~80 targets affected), and utf8_offset_test
+# sorts alphabetically last, so coverage never runs. Neither the
+# 0-byte backups nor the non-fatal-unzip loop can be fixed from a
+# project build.sh. Removing the utf8_* tail makes torture_test (a
+# C-API test whose backup is valid/non-empty) the last entry, so the
+# loop exits 0 and coverage runs again.
+#
+# This is a STOPGAP. The durable fix is making the unzip non-fatal in
+# OSS-Fuzz infra (infra/build/functions/build_and_run_coverage.py);
+# tracked under issue #14859. Revert this block (restoring utf8_*
+# fuzzing) once that lands or corpus pruning produces valid backups.
+# Any future luzer target sorting after torture_test (name u-z) also
+# re-breaks coverage until then.
+rm -f $OUT/utf8_*
+
 cp $LUALIB_PATH/$LUA_RUNTIME_NAME "$OUT/$LUA_RUNTIME_NAME"
 cp -R lua_modules "$OUT/"
