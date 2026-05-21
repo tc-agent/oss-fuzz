@@ -78,6 +78,17 @@ then
     cd $SRC/cryptofuzz/
     python gen_repository.py
 
+    # wc_{InitMd2,Md2Update,Md2Final,InitMd4,Md4Update,Md4Final} return int
+    # (not void) since wolfSSL/wolfssl#10460, so the wolfCrypt cryptofuzz module
+    # must use the *_Int template variants rather than *_Void for these digests.
+    sed -i -e 's/Init_Void<Md2>/Init_Int<Md2>/g' \
+           -e 's/Init_Void<Md4>/Init_Int<Md4>/g' \
+           -e 's/DigestUpdate_Void<Md2>/DigestUpdate_Int<Md2>/g' \
+           -e 's/DigestUpdate_Void<Md4>/DigestUpdate_Int<Md4>/g' \
+           -e 's/DigestFinalize_Void<Md2>/DigestFinalize_Int<Md2>/g' \
+           -e 's/DigestFinalize_Void<Md4>/DigestFinalize_Int<Md4>/g' \
+        $SRC/cryptofuzz/modules/wolfcrypt/module.cpp
+
     rm extra_options.h
     echo -n '"' >>extra_options.h
     echo -n '--force-module=wolfCrypt ' >>extra_options.h
