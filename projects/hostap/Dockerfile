@@ -20,4 +20,5 @@ RUN apt-get update && \
                        libssl-dev:i386
 RUN git clone --depth 1 https://w1.fi/hostap.git hostap
 WORKDIR hostap
+COPY seeds $SRC/seeds
 COPY build.sh $SRC/
