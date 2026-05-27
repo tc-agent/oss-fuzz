@@ -3678,6 +3678,1033 @@ def gen_mp4_extras(root):
 
 
 # ──────────────────────────────────────────────────
+#  ASF data packets (modules/demux/asf/asf.c + asfpacket.c)
+# ──────────────────────────────────────────────────
+#
+# The upstream asf seeds carry a Header Object but no Data Object packets, so
+# libasf.c parses headers (≈45% covered) while asf.c streaming and asfpacket.c
+# remain near 0%. Generate a minimal but structurally complete ASF file with a
+# Data Object containing several fixed-size packets so the demux loop runs.
+
+def _guid(s: str) -> bytes:
+    """Encode a textual GUID (e.g. '75B22630-668E-11CF-A6D9-00AA0062CE6C')
+    into ASF wire bytes (Data1/Data2/Data3 little-endian, Data4 as-is).
+    Accepts hex with or without dashes; 32 hex digits total.
+    """
+    s = s.replace('-', '').lower()
+    assert len(s) == 32, s
+    h = bytes.fromhex(s)
+    return bytes([h[3], h[2], h[1], h[0],
+                  h[5], h[4],
+                  h[7], h[6]]) + h[8:]
+
+# ASF GUIDs from the ASF specification (textual form).
+GUID_HEADER       = _guid('75B22630-668E-11CF-A6D9-00AA0062CE6C')
+GUID_DATA         = _guid('75B22636-668E-11CF-A6D9-00AA0062CE6C')
+GUID_FILEPROPS    = _guid('8CABDCA1-A947-11CF-8EE4-00C00C205365')
+GUID_STREAMPROPS  = _guid('B7DC0791-A9B7-11CF-8EE6-00C00C205365')
+GUID_HDREXT       = _guid('5FBF03B5-A92E-11CF-8EE3-00C00C205365')
+GUID_AUDIO_MEDIA  = _guid('F8699E40-5B4D-11CF-A8FD-00805F5C4420')
+GUID_NOERR        = _guid('20FB5700-5B55-11CF-A8FD-00805F5C4420')
+GUID_SIMPLE_INDEX = _guid('33000890-E5B1-11CF-89F4-00A0C90349CB')
+
+# Helper to build ASF objects (16-byte GUID + 8-byte LE length + payload)
+def _asf_obj(guid: bytes, payload: bytes) -> bytes:
+    return guid + struct.pack('<Q', 16 + 8 + len(payload)) + payload
+
+
+def _asf_wave_format_ex(codec_id: int = 0x0001,  # PCM
+                        channels: int = 1, rate: int = 8000,
+                        bps: int = 8) -> bytes:
+    block_align = max(1, channels * (bps // 8))
+    avg_bytes = rate * block_align
+    return struct.pack('<HHIIHHH',
+                       codec_id, channels, rate, avg_bytes,
+                       block_align, bps, 0)
+
+
+def _asf_file_properties(file_size: int, packet_count: int,
+                         packet_size: int = 256) -> bytes:
+    fileid = bytes(16)
+    return (fileid
+            + struct.pack('<Q', file_size)
+            + struct.pack('<Q', 0)          # creation date
+            + struct.pack('<Q', packet_count)
+            + struct.pack('<Q', 10_000_000)  # play duration (100ns)
+            + struct.pack('<Q', 10_000_000)  # send duration
+            + struct.pack('<Q', 0)           # preroll
+            + struct.pack('<I', 0x02)        # flags: seekable
+            + struct.pack('<I', packet_size) # min packet size
+            + struct.pack('<I', packet_size) # max packet size
+            + struct.pack('<I', 1000))       # max bitrate
+
+
+def _asf_stream_props(stream_number: int = 1) -> bytes:
+    type_specific = _asf_wave_format_ex()
+    return (GUID_AUDIO_MEDIA
+            + GUID_NOERR                       # error correction type
+            + struct.pack('<Q', 0)             # time offset
+            + struct.pack('<I', len(type_specific))
+            + struct.pack('<I', 0)             # ec data length
+            + struct.pack('<H', stream_number & 0x7F)
+            + struct.pack('<I', 0)
+            + type_specific)
+
+
+def _asf_data_packet(stream_number: int, payload: bytes,
+                     seq: int, ts_ms: int, packet_size: int = 256) -> bytes:
+    """Build a minimal ASF data packet with one payload.
+
+    Layout (Spec §5.2):
+      [error-correction byte 0x80] [length-type/property flags] [packet length]
+      [sequence] [padding length] [send time u32 ms] [duration u16 ms]
+      payload-flags + payload header
+    """
+    # Length-Type flags: packet length / padding length / sequence are 0
+    length_type = 0x00
+    # Property flags (asfpacket.c reads pkt->property bits 0-1 replicated,
+    # >>2 offset, >>4 media-object-number; stream number is always a single
+    # byte and has no length type field):
+    #   bits 0-1 = 01  replicated-data-length = 1 byte
+    #   bits 2-3 = 11  offset-into-media-object = 4 bytes
+    #   bits 4-5 = 01  media-object-number = 1 byte
+    property_flags = 0x01 | (0x03 << 2) | (0x01 << 4)
+    payload_header = (
+        bytes([stream_number & 0x7F])  # stream-number (no key frame bit)
+        + bytes([seq & 0xFF])          # media-object-number
+        + struct.pack('<I', 0)         # offset-into-media-object
+        + bytes([1])                   # replicated-data-length
+        + bytes([0])                   # 1 byte replicated data
+        + payload
+    )
+    pkt = (bytes([0x80])               # error-correction present + length 0
+           + bytes([length_type])
+           + bytes([property_flags])
+           + struct.pack('<I', ts_ms)
+           + struct.pack('<H', 10)     # duration ms
+           + payload_header)
+    # Pad to fixed packet_size.
+    if len(pkt) < packet_size:
+        pkt += b'\x00' * (packet_size - len(pkt))
+    else:
+        pkt = pkt[:packet_size]
+    return pkt
+
+
+def gen_asf_extras(root):
+    seed_dir = os.path.join(root, 'seeds', 'asf')
+    os.makedirs(seed_dir, exist_ok=True)
+    n_packets = 4
+    pkt_size = 256
+    packets = b''.join(
+        _asf_data_packet(1, bytes([i, 0xAA, 0x55]) * 8, seq=i, ts_ms=i * 10,
+                         packet_size=pkt_size)
+        for i in range(n_packets)
+    )
+    # Data Object body: file-id GUID + total-data-packets u64 + reserved u16
+    data_body = (bytes(16) + struct.pack('<Q', n_packets)
+                 + struct.pack('<H', 0x0101) + packets)
+    file_size = 30 + 16 + 8 + len(data_body)  # rough — recomputed below
+
+    fp = _asf_obj(GUID_FILEPROPS, _asf_file_properties(0, n_packets, pkt_size))
+    sp = _asf_obj(GUID_STREAMPROPS, _asf_stream_props())
+    header_body = struct.pack('<I', 2) + b'\x01\x02' + fp + sp
+    header_obj = _asf_obj(GUID_HEADER, header_body)
+    data_obj = _asf_obj(GUID_DATA, data_body)
+    asf_file = header_obj + data_obj
+    # Patch file-size now that we know it.
+    fp_new = _asf_obj(
+        GUID_FILEPROPS,
+        _asf_file_properties(len(asf_file), n_packets, pkt_size))
+    header_body = struct.pack('<I', 2) + b'\x01\x02' + fp_new + sp
+    asf_file = _asf_obj(GUID_HEADER, header_body) + data_obj
+    _write(os.path.join(seed_dir, 'pcm_packets.asf'), asf_file)
+
+
+# ──────────────────────────────────────────────────
+#  TS rich descriptors (ts_sl.c, ts_metadata.c, ts_arib.c, mpeg4_iod.c)
+# ──────────────────────────────────────────────────
+#
+# Currently ts_sl.c (212), ts_metadata.c (142), ts_arib.c (72) and
+# mpeg4_iod.c (500) are all at 0% line coverage.  Each is reached only when
+# the PMT carries a specific descriptor tag (0x1F SL_descriptor /
+# 0x26 metadata_descriptor / 0x1D IOD_descriptor) or when an ARIB-specific
+# section is parsed in ts_si.c (ARIB CDT/BIT/SDTT etc.).  Generate a TS file
+# whose PMT contains one of each so the demuxer walks every parser at least
+# once.
+
+def _desc(tag: int, body: bytes) -> bytes:
+    assert len(body) <= 255
+    return bytes([tag, len(body)]) + body
+
+
+def _iod_descriptor() -> bytes:
+    """MPEG-4 IOD_descriptor (tag 0x1D, ISO/IEC 14496-1 §8.6.3).
+
+    The TS-level descriptor is a tiny wrapper containing an
+    InitialObjectDescriptor() (tag 0x10) carried as raw bytes.  Even a
+    truncated IOD reaches mpeg4_iod.c parsing.
+    """
+    # InitialObjectDescriptor (tag=0x10): OD_ID (10 bits) +
+    # URL_flag (1) + includeInlineProfileLevelFlag (1) + reserved (4),
+    # then 5 profile-level bytes.
+    iod_body = (
+        bytes([0x10])                       # tag 0x10 (InitialObjectDescriptor)
+        + bytes([10])                       # length
+        + bytes([0x00, 0x4F])               # OD_ID + flags
+        + bytes([0x7F, 0xFF, 0xFF, 0xFF, 0xFF])  # profile-levels
+        + bytes([0x00, 0x00, 0x00])         # spare
+    )
+    return _desc(0x1D, b'\x00\x01' + iod_body)
+
+
+def _sl_descriptor(es_id: int = 0x0010) -> bytes:
+    """SL_descriptor (tag 0x1F) — used by MPEG-4 carriage in TS to bind a
+    stream to an ES_ID, parsed by ts_sl.c.
+    """
+    return _desc(0x1F, struct.pack('>H', es_id))
+
+
+def _metadata_descriptor() -> bytes:
+    """metadata_descriptor (tag 0x26, ISO/IEC 13818-1)."""
+    body = (
+        struct.pack('>H', 0x0001)          # metadata_application_format
+        + bytes([0xFF])                    # metadata_format = ID3 (0xFF→ext)
+        + b'ID3 '                          # metadata_format_identifier
+        + bytes([0x10])                    # metadata_service_id
+        + bytes([0xFC])                    # decoder config + dsm-cc + flags
+    )
+    return _desc(0x26, body)
+
+
+def _ac3_descriptor() -> bytes:
+    return _desc(0x6A, bytes([0x00, 0x00, 0x00, 0x00]))
+
+
+def _eac3_descriptor() -> bytes:
+    return _desc(0x7A, bytes([0x00, 0x00, 0x00, 0x00]))
+
+
+def _dts_descriptor() -> bytes:
+    """DTS audio descriptor (tag 0x7B)."""
+    return _desc(0x7B, bytes([0x10, 0x00, 0x00, 0xC0, 0x00]))
+
+
+def _registration_descriptor(fourcc: bytes) -> bytes:
+    assert len(fourcc) == 4
+    return _desc(0x05, fourcc)
+
+
+def _stream_identifier(component_tag: int) -> bytes:
+    return _desc(0x52, bytes([component_tag & 0xFF]))
+
+
+def gen_ts_descriptors(root):
+    reset_psi_cc()
+    seed_dir = os.path.join(root, 'seeds', 'ts')
+    os.makedirs(seed_dir, exist_ok=True)
+    # Stream descriptors in PMT entries.
+    streams = [
+        (0x06, 0x0080,                       # PES private
+         _registration_descriptor(b'AC-3') + _ac3_descriptor()),
+        (0x06, 0x0081,
+         _registration_descriptor(b'EAC3') + _eac3_descriptor()),
+        (0x06, 0x0082,
+         _registration_descriptor(b'DTS2') + _dts_descriptor()),
+        (0x15, 0x0090,                       # metadata stream
+         _metadata_descriptor() + _stream_identifier(0x10)),
+        (0x12, 0x0091,                       # MPEG-4 generic stream
+         _sl_descriptor(0x0010)),
+        (0x06, 0x0092,
+         _registration_descriptor(b'HEVC') + _stream_identifier(0x11)),
+    ]
+    prog_descriptors = _iod_descriptor()
+    pat = psi_packet(make_pat([(1, 0x0040)]), pid=0x0000)
+    # Build PMT with program descriptors prepended via a special builder.
+    pmt_body = (struct.pack('>H', 0xE000 | 0x0080)         # PCR PID
+                + struct.pack('>H', 0xF000 | len(prog_descriptors))
+                + prog_descriptors)
+    for stype, es_pid, descs in streams:
+        pmt_body += bytes([stype])
+        pmt_body += struct.pack('>H', 0xE000 | es_pid)
+        pmt_body += struct.pack('>H', 0xF000 | len(descs))
+        pmt_body += descs
+    pmt_section = psi_section(0x02, 0x0001, pmt_body)
+    pmt = psi_packet(pmt_section, pid=0x0040)
+    # A few null packets to give the demuxer something to keep reading.
+    null = make_ts_packet(0x1FFF, b'')
+    seed = pat + pmt + null * 4
+    pad = (-len(seed)) % 188
+    if pad: seed += b'\x00' * pad
+    _write(os.path.join(seed_dir, 'rich_descriptors.ts'), seed)
+
+
+# ──────────────────────────────────────────────────
+#  MP4 codec sample entries (modules/demux/mp4/essetup.c)
+# ──────────────────────────────────────────────────
+#
+# essetup.c (1189 lines, 17% covered) contains the per-codec setup paths that
+# convert MP4 SampleEntry boxes into VLC es_format_t.  Each codec-specific
+# entry (Opus, FLAC, AC-3, EAC-3, DTS, AV1, VP9, raw audio) lives behind a
+# fourcc dispatch and only runs when an MP4 with that SampleEntry is parsed.
+# Generate a family of minimal MP4s, each with exactly one codec sample entry
+# placed in an stsd box, so every TrackXxxxSetup() function fires.
+
+def _stsd(sample_entry: bytes) -> bytes:
+    return fullbox(b'stsd', 0, 0, struct.pack('>I', 1) + sample_entry)
+
+
+def _audio_sample_entry(fourcc: bytes, extra: bytes = b'',
+                        channels: int = 2, samplesize: int = 16,
+                        rate: int = 44100) -> bytes:
+    # SampleEntry: 6 reserved + 2 data_reference_index
+    # AudioSampleEntry v0: 8 reserved + channels u16 + samplesize u16
+    #   + 2 predefined + 2 reserved + samplerate (16.16) (rate u16 + 0 u16)
+    body = (
+        bytes(6) + struct.pack('>H', 1)
+        + bytes(8)
+        + struct.pack('>HH', channels, samplesize)
+        + bytes(4)
+        + struct.pack('>HH', rate, 0)
+        + extra
+    )
+    return box(fourcc, body)
+
+
+def _video_sample_entry(fourcc: bytes, extra: bytes = b'',
+                        w: int = 64, h: int = 64) -> bytes:
+    # VisualSampleEntry: 6 reserved + 2 data_reference_index + 16 predefined
+    # + width u16 + height u16 + horizresolution + vertresolution + reserved
+    # + frame_count u16 + compressorname[32] + depth u16 + predefined i16
+    body = (
+        bytes(6) + struct.pack('>H', 1)
+        + bytes(16)
+        + struct.pack('>HH', w, h)
+        + struct.pack('>II', 0x00480000, 0x00480000)
+        + bytes(4)
+        + struct.pack('>H', 1)
+        + bytes(32)
+        + struct.pack('>H', 24)
+        + struct.pack('>h', -1)
+        + extra
+    )
+    return box(fourcc, body)
+
+
+def _dops_box() -> bytes:
+    # 'dOps' Opus-in-MP4 specific box: version u8 + channels u8 + pre-skip u16
+    # + sample-rate u32 + output-gain i16 + mapping-family u8
+    return box(b'dOps', bytes([0]) + bytes([2])
+               + struct.pack('>H', 0)
+               + struct.pack('>I', 48000)
+               + struct.pack('>h', 0)
+               + bytes([0]))
+
+
+def _dac3_box() -> bytes:
+    # 'dac3' AC-3 specific box: 3 bytes packed (ETSI TS 102 366 Annex F)
+    return box(b'dac3', bytes([0x10, 0x40, 0x20]))
+
+
+def _dec3_box() -> bytes:
+    return box(b'dec3', bytes([0x00, 0x40, 0x00, 0x0f, 0x00]))
+
+
+def _ddts_box() -> bytes:
+    return box(b'ddts',
+               struct.pack('>I', 48000) + struct.pack('>I', 1500000)
+               + bytes([0, 0, 0]) + bytes([1, 0, 0]))
+
+
+def _dfla_box() -> bytes:
+    # 'dfLa' is a FullBox (version+flags=0) followed by FLAC metadata blocks.
+    # essetup.c::ATOM_fLaC checks GetDWBE(blob) == 0 (the FullBox header) and
+    # then overwrites the first 4 bytes with "fLaC".
+    streaminfo = (
+        struct.pack('>H', 4096) + struct.pack('>H', 4096)
+        + b'\x00\x00\x00\x00\x00\x00'
+        + struct.pack('>I', (44100 << 12) | (1 << 9) | (15 << 4))
+        + struct.pack('>I', 0)
+        + bytes(16)
+    )
+    return box(b'dfLa',
+               bytes(4)                                   # FullBox version+flags
+               + bytes([0x80, 0x00, 0x00, 0x22])          # METADATA_BLOCK header
+               + streaminfo)
+
+
+def _av1c_box_full() -> bytes:
+    # AV1CodecConfigurationBox — minimal valid header
+    return box(b'av1C', bytes([0x81, 0x05, 0x0c, 0x00]))
+
+
+def _vpcc_box() -> bytes:
+    # VPCodecConfigurationBox for vp08/vp09
+    return fullbox(b'vpcC', 1, 0,
+                   bytes([0,                            # profile
+                          0,                            # level
+                          (8 << 4) | (0 << 1) | 0,      # bit-depth/chroma/range
+                          1,                            # color primaries
+                          1,                            # transfer
+                          1,                            # matrix
+                          0, 0]))                       # codec init data sz
+
+
+def _hvcc_box_minimal() -> bytes:
+    # HEVCDecoderConfigurationRecord: 23-byte fixed header + 0 arrays.
+    body = (
+        bytes([0x01])                                   # configurationVersion
+        + bytes([0x01, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        + struct.pack('>H', 0xF000)                     # min_spatial_segm
+        + bytes([0xFC, 0xFD, 0xF8, 0xF8])
+        + struct.pack('>H', 0)                          # avgFrameRate
+        + bytes([0x0F])                                 # const+nal+temporal
+        + bytes([0])                                    # numOfArrays
+    )
+    return box(b'hvcC', body)
+
+
+def _stbl_with_entry(entry: bytes, sample_size: int = 4,
+                     sample_offset: int = 0) -> bytes:
+    stsd = _stsd(entry)
+    # One time-to-sample entry: 1 sample, delta 1024
+    stts = fullbox(b'stts', 0, 0,
+                   struct.pack('>I', 1) + struct.pack('>II', 1, 1024))
+    # One sample-to-chunk run: first_chunk=1, samples_per_chunk=1, desc_idx=1
+    stsc = fullbox(b'stsc', 0, 0,
+                   struct.pack('>I', 1) + struct.pack('>III', 1, 1, 1))
+    # Sample size table: 1 sample of sample_size bytes
+    stsz = fullbox(b'stsz', 0, 0,
+                   struct.pack('>II', 0, 1) + struct.pack('>I', sample_size))
+    # One chunk offset; caller may patch this after layout is known.
+    stco = fullbox(b'stco', 0, 0,
+                   struct.pack('>I', 1) + struct.pack('>I', sample_offset))
+    return box(b'stbl', stsd + stts + stsc + stsz + stco)
+
+
+def _minimal_mp4(sample_entry: bytes, handler: bytes) -> bytes:
+    sample = b'\x00\x00\x00\x00'                            # 4-byte payload
+    head = ftyp(b'mp42', [b'mp42', b'isom'])
+    sample_offset = len(head) + 8                           # mdat header is 8B
+    mdat = box(b'mdat', sample)
+    mvhd = fullbox(b'mvhd', 0, 0,
+                   struct.pack('>I', 0) + struct.pack('>I', 0)
+                   + struct.pack('>I', 1000) + struct.pack('>I', 0)
+                   + bytes(76)
+                   + struct.pack('>I', 2))
+    tkhd = fullbox(b'tkhd', 0, 7,
+                   struct.pack('>I', 0) + struct.pack('>I', 0)
+                   + struct.pack('>I', 1) + struct.pack('>I', 0)
+                   + struct.pack('>I', 0)
+                   + bytes(8)
+                   + bytes(8)
+                   + bytes(36)
+                   + struct.pack('>II', 0, 0))
+    mdhd = fullbox(b'mdhd', 0, 0,
+                   struct.pack('>I', 0) + struct.pack('>I', 0)
+                   + struct.pack('>I', 1000) + struct.pack('>I', 0)
+                   + struct.pack('>HH', 0x55C4, 0))
+    hdlr_box = hdlr(handler)
+    dinf = box(b'dinf',
+               fullbox(b'dref', 0, 0,
+                       struct.pack('>I', 1)
+                       + fullbox(b'url ', 0, 1, b'')))
+    stbl = _stbl_with_entry(sample_entry,
+                            sample_size=len(sample),
+                            sample_offset=sample_offset)
+    minf = box(b'minf', dinf + stbl)
+    mdia = box(b'mdia', mdhd + hdlr_box + minf)
+    trak = box(b'trak', tkhd + mdia)
+    moov = box(b'moov', mvhd + trak)
+    return head + mdat + moov
+
+
+def gen_mp4_codecs(root):
+    seed_dir = os.path.join(root, 'seeds', 'mp4')
+    os.makedirs(seed_dir, exist_ok=True)
+    entries = {
+        'opus.mp4'  : (_audio_sample_entry(b'Opus', _dops_box()), b'soun'),
+        'ac3.mp4'   : (_audio_sample_entry(b'ac-3', _dac3_box()), b'soun'),
+        'eac3.mp4'  : (_audio_sample_entry(b'ec-3', _dec3_box()), b'soun'),
+        'dts.mp4'   : (_audio_sample_entry(b'dtsc', _ddts_box()), b'soun'),
+        'flac.mp4'  : (_audio_sample_entry(b'fLaC', _dfla_box()), b'soun'),
+        'alaw.mp4'  : (_audio_sample_entry(b'alaw'), b'soun'),
+        'ulaw.mp4'  : (_audio_sample_entry(b'ulaw'), b'soun'),
+        'av01.mp4'  : (_video_sample_entry(b'av01', _av1c_box_full()), b'vide'),
+        'vp09.mp4'  : (_video_sample_entry(b'vp09', _vpcc_box()), b'vide'),
+        'hev1.mp4'  : (_video_sample_entry(b'hev1', _hvcc_box_minimal()), b'vide'),
+        'mjpa.mp4'  : (_video_sample_entry(b'mjpa'), b'vide'),
+    }
+    for name, (entry, handler) in entries.items():
+        _write(os.path.join(seed_dir, name), _minimal_mp4(entry, handler))
+
+
+# ──────────────────────────────────────────────────
+#  NSV (modules/demux/nsv.c)
+# ──────────────────────────────────────────────────
+#
+# nsv.c at 1.8% — the 4 upstream nuv seeds are wrong format (NuppelVideo, not
+# Nullsoft Streaming).  An NSV file alternates 'NSVf' file headers and 'NSVs'
+# sync chunks every ~1s.  Provide both header types and a minimal multi-chunk
+# stream.
+
+def _nsv_audio_pcm(rate: int = 8000) -> bytes:
+    # In NSV the audio fourcc determines the codec; 'PCM ' is one of the
+    # supported types.  Followed by a tiny PCM frame.
+    return bytes(64)
+
+
+def gen_nsv(root):
+    seed_dir = os.path.join(root, 'seeds', 'nsv')
+    os.makedirs(seed_dir, exist_ok=True)
+    # NSVf header: magic + header_size + file_size + file_len_ms + metadata_len
+    # + toc_alloc + toc_size (rest of the spec lists 0).  We pad the header to
+    # the recorded size so subsequent NSVs sync chunks land at the offset
+    # promised in the header.
+    metadata = b''
+    toc_alloc = 0
+    toc_size = 0
+    header_payload = (
+        b'NSVf'
+        + struct.pack('<I', 32)             # header size (rounded)
+        + struct.pack('<I', 0)              # file size (unknown / streaming)
+        + struct.pack('<I', 1000)           # file length ms
+        + struct.pack('<I', len(metadata))
+        + struct.pack('<I', toc_alloc)
+        + struct.pack('<I', toc_size)
+        + metadata
+    )
+    if len(header_payload) < 32:
+        header_payload += b'\x00' * (32 - len(header_payload))
+    # NSVs sync chunk: 'NSVs' + vid_fourcc + aud_fourcc + width u16 + height u16
+    # + framerate u8 + audio sync offset u16
+    sync = (b'NSVs' + b'VP31' + b'PCM '
+            + struct.pack('<HH', 320, 240)
+            + bytes([0x1E])                  # 30 fps
+            + struct.pack('<H', 0))
+    # Per-chunk frame: aux+video low/high u16 + audio_len u16 + payload bytes
+    chunk = (bytes([0])                      # num_aux + video_len lo
+             + bytes([0, 0])                 # video_len hi
+             + struct.pack('<H', 8)          # audio_len = 8
+             + b'\x00' * 8)
+    body = sync + chunk + sync + chunk
+    _write(os.path.join(seed_dir, 'minimal.nsv'), header_payload + body)
+    # Streaming variant (no NSVf, starts straight with NSVs)
+    _write(os.path.join(seed_dir, 'streaming.nsv'), sync + chunk * 3)
+
+
+# ──────────────────────────────────────────────────
+#  MJPEG (modules/demux/mjpeg.c)
+# ──────────────────────────────────────────────────
+#
+# The MJPEG demuxer scans for SOI(0xFFD8) ... EOI(0xFFD9) markers in a stream.
+# Without a multipart boundary it falls back to "raw" mode that picks every
+# frame as a delimiter.  Provide a minimal two-frame raw MJPEG.
+
+def _minimal_jpeg() -> bytes:
+    # SOI + APP0/JFIF + DQT + SOF0 + DHT + SOS + minimal entropy + EOI
+    soi  = b'\xFF\xD8'
+    app0 = b'\xFF\xE0\x00\x10' + b'JFIF\x00\x01\x02\x00\x00\x01\x00\x01\x00\x00'
+    dqt  = b'\xFF\xDB\x00\x43\x00' + bytes([16]) * 64
+    sof0 = b'\xFF\xC0\x00\x11\x08\x00\x08\x00\x08\x03'\
+           b'\x01\x22\x00\x02\x11\x01\x03\x11\x01'
+    dht  = b'\xFF\xC4\x00\x14\x00' + bytes(16) + b'\x00'
+    sos  = b'\xFF\xDA\x00\x0C\x03\x01\x00\x02\x11\x03\x11\x00\x3F\x00'
+    ecs  = b'\x00\x00'
+    eoi  = b'\xFF\xD9'
+    return soi + app0 + dqt + sof0 + dht + sos + ecs + eoi
+
+
+def gen_mjpeg(root):
+    seed_dir = os.path.join(root, 'seeds', 'mjpeg')
+    os.makedirs(seed_dir, exist_ok=True)
+    frame = _minimal_jpeg()
+    # mjpg demux samples the stream by SOI markers; supply two frames.
+    _write(os.path.join(seed_dir, 'raw.mjpg'), frame + frame)
+    # Multipart variant (mpeg-streaming style) — boundary delimited.
+    boundary = b'--myboundary'
+    multipart = (
+        b'HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=myboundary\r\n\r\n'
+        + boundary + b'\r\nContent-Type: image/jpeg\r\nContent-Length: '
+        + str(len(frame)).encode() + b'\r\n\r\n' + frame + b'\r\n'
+        + boundary + b'\r\nContent-Type: image/jpeg\r\nContent-Length: '
+        + str(len(frame)).encode() + b'\r\n\r\n' + frame + b'\r\n'
+        + boundary + b'--\r\n'
+    )
+    _write(os.path.join(seed_dir, 'multipart.mjpg'), multipart)
+    dict_path = os.path.join(root, 'dictionaries', 'mjpeg.dict')
+    os.makedirs(os.path.dirname(dict_path), exist_ok=True)
+    with open(dict_path, 'w') as f:
+        f.write(
+            '# JPEG markers\n'
+            '"\\xff\\xd8"\n'
+            '"\\xff\\xd9"\n'
+            '"\\xff\\xc0"\n'
+            '"\\xff\\xc4"\n'
+            '"\\xff\\xda"\n'
+            '"\\xff\\xdb"\n'
+            '"\\xff\\xe0"\n'
+            '"--"\n'
+            '"Content-Type"\n'
+            '"image/jpeg"\n'
+        )
+    print(f'  wrote {dict_path}')
+
+
+# ──────────────────────────────────────────────────
+#  FLAC native (modules/demux/flac.c + codec/flac.c)
+# ──────────────────────────────────────────────────
+#
+# The native FLAC demuxer reads "fLaC" magic + STREAMINFO + audio frames.  The
+# upstream flac/ seeds are MP4-in-FLAC (ftyp), so flac.c demuxer barely runs.
+
+def gen_flac_native(root):
+    seed_dir = os.path.join(root, 'seeds', 'flac')
+    os.makedirs(seed_dir, exist_ok=True)
+    streaminfo = (
+        struct.pack('>H', 4096) + struct.pack('>H', 4096)   # min/max block size
+        + b'\x00\x00\x00\x00\x00\x00'                       # min/max frame size
+        + struct.pack('>I',                                  # samplerate(20)/ch(3)/bps(5)/total(36 split)
+                      (44100 << 12) | (1 << 9) | (15 << 4))
+        + struct.pack('>I', 0)                              # total samples lo
+        + bytes(16)                                          # md5
+    )
+    # METADATA_BLOCK header: last=1, type=0 (STREAMINFO), length=34
+    metadata = bytes([0x80, 0x00, 0x00, 0x22]) + streaminfo
+    # A short native FLAC frame header + a few payload bytes (parser-friendly,
+    # not strictly decodable — flac.c only needs the sync to advance).
+    frame_hdr = bytes([0xFF, 0xF8, 0x69, 0x18, 0x00, 0x00, 0x00])
+    _write(os.path.join(seed_dir, 'native_streaminfo.flac'),
+           b'fLaC' + metadata + frame_hdr + b'\x00' * 16)
+
+
+# ──────────────────────────────────────────────────
+#  TY series-2 stream (modules/demux/ty.c)
+# ──────────────────────────────────────────────────
+#
+# ty.c (1147 lines, 5%) needs full 128-KiB chunks with valid TiVo chunk
+# headers.  Generate two chunks (the first is recognised as "fileid",
+# the second carries SubRec records of types 0x01 video, 0x02 audio, and
+# 0x09 program/PMT) so the per-record switch in tivo_demux runs.
+
+TY_CHUNK_SIZE = 128 * 1024
+
+
+def _ty_subrec(rec_type: int, sub_id: int, payload: bytes,
+               continued: bool = False) -> bytes:
+    # SubRec header: type<<4 | sub_id (12 bits packed) + size (32 bits).
+    # Format per ty.c::get_chunk: high nibble of byte 0 = type;
+    # low 4 bits + byte 1 = sub_id; bytes 2..5 = size + continuation flag.
+    head = bytes([
+        ((rec_type & 0x0F) << 4) | ((sub_id >> 8) & 0x0F),
+        sub_id & 0xFF,
+        ((len(payload) >> 8) & 0xFF) | (0x80 if continued else 0x00),
+        len(payload) & 0xFF,
+    ])
+    return head + payload
+
+
+def _ty_master_chunk() -> bytes:
+    """A 128-KiB master chunk.  ty.c::Open requires the first 12 bytes to
+    be TIVO_PES_FILEID (0xF5467ABD BE), chunk type 0x02 (BE u32) and chunk
+    size = TY_CHUNK_SIZE.  The rest of the master chunk is padded with
+    0xFF; the demuxer treats unrecognised master content gracefully.
+    """
+    header = struct.pack('>I', 0xF5467ABD) + struct.pack('>I', 2) \
+             + struct.pack('>I', TY_CHUNK_SIZE) + bytes(4)
+    return header + b'\xFF' * (TY_CHUNK_SIZE - len(header))
+
+
+def _ty_stream_chunk(records: bytes) -> bytes:
+    """A 128-KiB stream chunk: SubRec records followed by 0xFF padding."""
+    body = records
+    if len(body) < TY_CHUNK_SIZE:
+        body += b'\xFF' * (TY_CHUNK_SIZE - len(body))
+    else:
+        body = body[:TY_CHUNK_SIZE]
+    return body
+
+
+def gen_ty_extras(root):
+    seed_dir = os.path.join(root, 'seeds', 'ty')
+    os.makedirs(seed_dir, exist_ok=True)
+    # master chunk + a stream chunk carrying the SubRec types tivo_demux
+    # dispatches on.  ty.c reads exactly TY_CHUNK_SIZE bytes per call so a
+    # seed shorter than 2*TY_CHUNK_SIZE would only exercise master handling.
+    pkt_video = bytes([0x00, 0x00, 0x01, 0xE0, 0x00, 0x08, 0x80, 0x00, 0x00])
+    pkt_audio = bytes([0x00, 0x00, 0x01, 0xC0, 0x00, 0x06, 0x80, 0x00, 0x00])
+    recs = (
+        _ty_subrec(0x09, 0x00, b'PROG' + b'\x00' * 8)       # program info
+        + _ty_subrec(0x01, 0x06, pkt_video + b'\x00' * 24)  # video PES
+        + _ty_subrec(0x02, 0x09, pkt_audio + b'\x00' * 24)  # audio PES
+        + _ty_subrec(0x03, 0x00, b'CC ' + b'\x00' * 13)     # CC data
+    )
+    _write(os.path.join(seed_dir, 'series2_records.ty'),
+           _ty_master_chunk() + _ty_stream_chunk(recs))
+
+
+# ──────────────────────────────────────────────────
+#  LPCM in PS (modules/codec/lpcm.c via private-stream-1 substreams)
+# ──────────────────────────────────────────────────
+#
+# Currently codec/lpcm.c is at 3.8% (30/796).  A DVD LPCM substream lives in
+# the PS demuxer's private_stream_1 (0xBD) PES with substream_id 0xA0-0xBF,
+# preceded by a 7-byte private LPCM header.  The PS demuxer routes that
+# substream into lpcm.c.  Generate a PS seed carrying one such substream.
+
+def gen_lpcm_ps(root):
+    seed_dir = os.path.join(root, 'seeds', 'ps')
+    os.makedirs(seed_dir, exist_ok=True)
+    pack = make_ps_pack_header(0, 0x1869F)
+    # LPCM private header for DVD: substream-id (0xA0) + frame count + first
+    # access unit offset (2 bytes) + audio emphasis/mute/frame number (1) +
+    # quantization/sample rate/channels (1) + dynamic range (1).
+    lpcm_hdr = bytes([0xA0, 0x01, 0x00, 0x04,
+                      0x00,
+                      0x0F,            # 16-bit / 48kHz / 2ch
+                      0x80])
+    sample_data = b'\x00\x00\x01\x02' * 8
+    pes_payload = lpcm_hdr + sample_data
+    pes = make_ps_pes(0xBD, pes_payload, pts_90khz=9000)
+    end = b'\x00\x00\x01\xB9'
+    _write(os.path.join(seed_dir, 'lpcm_substream.vob'), pack + pes + end)
+
+
+# ──────────────────────────────────────────────────
+#  OGG multi-bitstream / multi-page seek (modules/demux/oggseek.c)
+# ──────────────────────────────────────────────────
+#
+# oggseek.c (662 lines, 8.2%) is hit when the demuxer rewinds across multiple
+# pages chained from several bitstreams.  Provide an OGG seed with two
+# logical bitstreams (different serial numbers) and many pages each so the
+# seek/probe paths fire.
+
+def gen_oggseek(root):
+    seed_dir = os.path.join(root, 'seeds', 'ogg')
+    os.makedirs(seed_dir, exist_ok=True)
+    # Two logical bitstreams identified as Vorbis so Ogg_LogicalStreamSetup
+    # recognises them; only then are oggseek.c's seek/recovery paths reached.
+    pages = []
+    def add_stream(serial: int):
+        pages.append(ogg_page([_vorbis_ident_packet()], serial=serial,
+                              page_seq=0, granule=0, bos=True))
+        for i in range(1, 6):
+            pages.append(ogg_page([bytes(32)], serial=serial, page_seq=i,
+                                  granule=i * 1024))
+        pages.append(ogg_page([bytes(32)], serial=serial, page_seq=6,
+                              granule=6 * 1024, eos=True))
+    add_stream(0x11111111)
+    add_stream(0x22222222)
+    _write(os.path.join(seed_dir, 'multi_stream_seek.ogg'), b''.join(pages))
+
+
+def _vorbis_ident_packet() -> bytes:
+    """Vorbis identification packet (page-0 BOS payload)."""
+    return (bytes([0x01]) + b'vorbis'
+            + struct.pack('<I', 0)
+            + bytes([2])
+            + struct.pack('<I', 44100)
+            + struct.pack('<iii', -1, 128000, -1)
+            + bytes([0x88])
+            + bytes([1]))
+
+
+# ──────────────────────────────────────────────────
+#  MP4 sample-table extras (libmp4.c)
+# ──────────────────────────────────────────────────
+#
+# libmp4.c contains parsers for many SampleTable sub-boxes that the upstream
+# corpus rarely exercises: edit lists (elst), composition-time-to-sample
+# (ctts), sync-sample-table (stss), shadow-sync (stsh), sample-groups
+# (sbgp/sgpd), padding (padb), independent-and-disposable-samples (sdtp),
+# user-data (udta), metadata atom (meta with ilst), object descriptor (iods).
+# Seed each as a separate MP4 placing the box(es) at their canonical
+# location so MP4_BoxGetRoot walks them.
+
+def _mp4_with_extra_boxes(extra_in_stbl: bytes = b'',
+                          extra_in_trak: bytes = b'',
+                          extra_in_moov: bytes = b'') -> bytes:
+    sample = b'\x00\x00\x00\x00'
+    head = ftyp(b'mp42', [b'mp42', b'isom'])
+    sample_offset = len(head) + 8
+    mdat = box(b'mdat', sample)
+    mvhd = fullbox(b'mvhd', 0, 0,
+                   struct.pack('>I', 0) + struct.pack('>I', 0)
+                   + struct.pack('>I', 1000) + struct.pack('>I', 0)
+                   + bytes(76) + struct.pack('>I', 2))
+    tkhd = fullbox(b'tkhd', 0, 7,
+                   struct.pack('>I', 0) + struct.pack('>I', 0)
+                   + struct.pack('>I', 1) + struct.pack('>I', 0)
+                   + struct.pack('>I', 0) + bytes(8) + bytes(8) + bytes(36)
+                   + struct.pack('>II', 0, 0))
+    mdhd = fullbox(b'mdhd', 0, 0,
+                   struct.pack('>I', 0) + struct.pack('>I', 0)
+                   + struct.pack('>I', 1000) + struct.pack('>I', 0)
+                   + struct.pack('>HH', 0x55C4, 0))
+    hdlr_box = hdlr(b'soun')
+    dinf = box(b'dinf',
+               fullbox(b'dref', 0, 0,
+                       struct.pack('>I', 1)
+                       + fullbox(b'url ', 0, 1, b'')))
+    audio_entry = _audio_sample_entry(b'mp4a')
+    stbl = _stbl_with_entry(audio_entry,
+                            sample_size=len(sample),
+                            sample_offset=sample_offset)
+    # Splice extra_in_stbl into stbl by reopening the box.
+    stbl_inner = stbl[8:] + extra_in_stbl
+    stbl = box(b'stbl', stbl_inner)
+    minf = box(b'minf', dinf + stbl)
+    mdia = box(b'mdia', mdhd + hdlr_box + minf)
+    trak = box(b'trak', tkhd + mdia + extra_in_trak)
+    moov = box(b'moov', mvhd + trak + extra_in_moov)
+    return head + mdat + moov
+
+
+def _elst_box() -> bytes:
+    # edit list: 1 entry, duration=1000, media_time=0, rate=1.0
+    return box(b'edts',
+               fullbox(b'elst', 0, 0,
+                       struct.pack('>I', 1)
+                       + struct.pack('>IiI', 1000, 0, 0x00010000)))
+
+
+def _ctts_box() -> bytes:
+    return fullbox(b'ctts', 0, 0,
+                   struct.pack('>I', 1) + struct.pack('>II', 1, 0))
+
+
+def _stss_box() -> bytes:
+    return fullbox(b'stss', 0, 0,
+                   struct.pack('>I', 1) + struct.pack('>I', 1))
+
+
+def _stsh_box() -> bytes:
+    return fullbox(b'stsh', 0, 0,
+                   struct.pack('>I', 1) + struct.pack('>II', 1, 1))
+
+
+def _sbgp_sgpd_boxes() -> bytes:
+    sbgp = fullbox(b'sbgp', 1, 0,
+                   b'roll' + struct.pack('>I', 0)
+                   + struct.pack('>I', 1) + struct.pack('>II', 1, 1))
+    sgpd = fullbox(b'sgpd', 1, 0,
+                   b'roll' + struct.pack('>I', 2)
+                   + struct.pack('>I', 1) + struct.pack('>h', -1))
+    return sbgp + sgpd
+
+
+def _padb_box() -> bytes:
+    # padding bits: 1 sample, 1 byte
+    return fullbox(b'padb', 0, 0,
+                   struct.pack('>I', 1) + struct.pack('>B', 0))
+
+
+def _sdtp_box() -> bytes:
+    return fullbox(b'sdtp', 0, 0, struct.pack('>B', 0x14))  # 1 sample
+
+
+def _udta_meta_ilst() -> bytes:
+    # meta inside udta with hdlr=mdir + ilst {©nam}
+    nam_data = fullbox(b'data', 0, 1, b'Test Title')
+    nam = box(b'\xa9nam', nam_data)
+    ilst = box(b'ilst', nam)
+    meta_hdlr = hdlr(b'mdir')
+    meta = fullbox(b'meta', 0, 0, meta_hdlr + ilst)
+    return box(b'udta', meta)
+
+
+def _iods_box() -> bytes:
+    # iods (Object Descriptor Box, version 0 flags 0) wrapping a tiny IOD
+    iod_payload = (
+        bytes([0x10])                              # IOD tag (InitialOD)
+        + bytes([10])                              # length
+        + bytes([0x00, 0x4F])                      # OD_ID + flags
+        + bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
+        + bytes([0x00, 0x00, 0x00])
+    )
+    return fullbox(b'iods', 0, 0, iod_payload)
+
+
+def gen_mp4_stbl_extras(root):
+    seed_dir = os.path.join(root, 'seeds', 'mp4')
+    os.makedirs(seed_dir, exist_ok=True)
+    _write(os.path.join(seed_dir, 'with_elst.mp4'),
+           _mp4_with_extra_boxes(extra_in_trak=_elst_box()))
+    _write(os.path.join(seed_dir, 'with_ctts_stss.mp4'),
+           _mp4_with_extra_boxes(extra_in_stbl=_ctts_box() + _stss_box()))
+    _write(os.path.join(seed_dir, 'with_stsh.mp4'),
+           _mp4_with_extra_boxes(extra_in_stbl=_stsh_box()))
+    _write(os.path.join(seed_dir, 'with_sample_groups.mp4'),
+           _mp4_with_extra_boxes(extra_in_stbl=_sbgp_sgpd_boxes()))
+    _write(os.path.join(seed_dir, 'with_padb_sdtp.mp4'),
+           _mp4_with_extra_boxes(extra_in_stbl=_padb_box() + _sdtp_box()))
+    _write(os.path.join(seed_dir, 'with_meta_ilst.mp4'),
+           _mp4_with_extra_boxes(extra_in_trak=_udta_meta_ilst()))
+    _write(os.path.join(seed_dir, 'with_iods.mp4'),
+           _mp4_with_extra_boxes(extra_in_moov=_iods_box()))
+
+
+# ──────────────────────────────────────────────────
+#  MP4 fragmented (moof/traf/trun)
+# ──────────────────────────────────────────────────
+#
+# Fragmented MP4 exercises modules/demux/mp4/mp4.c moof handling, mfra/mfhd
+# parsing, and libmp4.c trun/tfhd/tfdt/sbgp(traf) parsers.  Provide an
+# init segment (ftyp+moov with mvex+trex) followed by a single fragment
+# (moof with mfhd+traf containing tfhd+tfdt+trun) and a tiny mdat.
+
+def gen_mp4_fragmented(root):
+    seed_dir = os.path.join(root, 'seeds', 'mp4')
+    os.makedirs(seed_dir, exist_ok=True)
+    sample = b'\x00' * 16
+    head = ftyp(b'iso5', [b'iso5', b'mp42', b'dash'])
+    # init: moov with mvex/trex
+    mvhd = fullbox(b'mvhd', 0, 0,
+                   struct.pack('>I', 0) + struct.pack('>I', 0)
+                   + struct.pack('>I', 1000) + struct.pack('>I', 0)
+                   + bytes(76) + struct.pack('>I', 2))
+    tkhd = fullbox(b'tkhd', 0, 7,
+                   struct.pack('>I', 0) + struct.pack('>I', 0)
+                   + struct.pack('>I', 1) + struct.pack('>I', 0)
+                   + struct.pack('>I', 0) + bytes(8) + bytes(8) + bytes(36)
+                   + struct.pack('>II', 0, 0))
+    mdhd = fullbox(b'mdhd', 0, 0,
+                   struct.pack('>I', 0) + struct.pack('>I', 0)
+                   + struct.pack('>I', 1000) + struct.pack('>I', 0)
+                   + struct.pack('>HH', 0x55C4, 0))
+    hdlr_box = hdlr(b'soun')
+    dinf = box(b'dinf',
+               fullbox(b'dref', 0, 0,
+                       struct.pack('>I', 1)
+                       + fullbox(b'url ', 0, 1, b'')))
+    audio_entry = _audio_sample_entry(b'mp4a')
+    # Fragmented: empty stbl tables, samples come from trun.
+    stsd = _stsd(audio_entry)
+    stts = fullbox(b'stts', 0, 0, struct.pack('>I', 0))
+    stsc = fullbox(b'stsc', 0, 0, struct.pack('>I', 0))
+    stsz = fullbox(b'stsz', 0, 0, struct.pack('>II', 0, 0))
+    stco = fullbox(b'stco', 0, 0, struct.pack('>I', 0))
+    stbl = box(b'stbl', stsd + stts + stsc + stsz + stco)
+    minf = box(b'minf', dinf + stbl)
+    mdia = box(b'mdia', mdhd + hdlr_box + minf)
+    trak = box(b'trak', tkhd + mdia)
+    trex = fullbox(b'trex', 0, 0,
+                   struct.pack('>I', 1)         # track_ID
+                   + struct.pack('>I', 1)       # default_sample_description_index
+                   + struct.pack('>I', 1024)    # default_sample_duration
+                   + struct.pack('>I', len(sample))  # default_sample_size
+                   + struct.pack('>I', 0))      # default_sample_flags
+    mvex = box(b'mvex', trex)
+    moov = box(b'moov', mvhd + trak + mvex)
+    # Build fragment.
+    mfhd = fullbox(b'mfhd', 0, 0, struct.pack('>I', 1))  # sequence_number
+    tfhd = fullbox(b'tfhd', 0, 0x020000,                 # default-base-is-moof
+                   struct.pack('>I', 1))                 # track_ID
+    tfdt = fullbox(b'tfdt', 1, 0, struct.pack('>Q', 0))
+    # trun: 1 sample, flag 0x000901 = data-offset-present (0x000001) +
+    # sample-size-present (0x000200) + sample-duration-present (0x000100).
+    trun_flags = 0x000001 | 0x000100 | 0x000200
+    trun_payload = (struct.pack('>I', 1)                  # sample_count
+                    + struct.pack('>i', 0)                # data_offset (patched)
+                    + struct.pack('>III', 1024, len(sample), 0))
+    trun = fullbox(b'trun', 0, trun_flags, trun_payload)
+    traf = box(b'traf', tfhd + tfdt + trun)
+    moof = box(b'moof', mfhd + traf)
+    # data_offset in trun is relative to start of moof; sample sits in
+    # mdat after moof, i.e. at len(moof)+8 from moof start.
+    sample_offset_in_moof = len(moof) + 8
+    moof_bytes = bytearray(moof)
+    # Locate the 4-byte 'data_offset' in trun: after trun header (12) + 4 (sample_count)
+    trun_search = trun
+    idx = moof.find(b'trun')
+    # data_offset is the 4-byte signed int 8 bytes after the 'trun' name.
+    # 'trun' fourcc lives at index (size:4 already covered) — easier: find
+    # the trun body and overwrite its data_offset field directly.
+    # Body offset = idx + 4 (fourcc) + 4 (version/flags) + 4 (sample_count)
+    do_off = idx + 4 + 4 + 4
+    moof_bytes[do_off:do_off + 4] = struct.pack('>i', sample_offset_in_moof)
+    moof = bytes(moof_bytes)
+    mdat = box(b'mdat', sample)
+    _write(os.path.join(seed_dir, 'fragment_dash.mp4'),
+           head + moov + moof + mdat)
+
+
+# ──────────────────────────────────────────────────
+#  TS Service Information variants (ts_si.c)
+# ──────────────────────────────────────────────────
+#
+# ts_si.c handles SDT, EIT, TDT, TOT.  Provide a TS seed with TDT and TOT
+# (carry no descriptors but exercise the parsers) plus a richer EIT.
+
+def gen_ts_si_extras(root):
+    reset_psi_cc()
+    seed_dir = os.path.join(root, 'seeds', 'ts')
+    os.makedirs(seed_dir, exist_ok=True)
+    pat = psi_packet(make_pat([(1, 0x0040)]), pid=0x0000)
+    # TDT: table_id 0x70, no CRC, 5 MJD+BCD bytes
+    tdt_section = bytes([0x70, 0x70, 0x05]) + bytes([0x4F, 0x99, 0x12, 0x00, 0x00])
+    tdt = psi_packet(tdt_section, pid=0x0014)
+    # TOT: table_id 0x73, with descriptors loop (empty) + CRC
+    tot_body = bytes([0x4F, 0x99, 0x12, 0x00, 0x00]) + struct.pack('>H', 0xF000)
+    section_length = len(tot_body) + 4
+    tot_section = bytes([0x73]) + struct.pack('>H', 0x7000 | section_length) + tot_body
+    tot_section += struct.pack('>I', crc32_mpeg(tot_section))
+    tot = psi_packet(tot_section, pid=0x0014)
+    # Minimal EIT present/following (0x4E) on PID 0x0012.  psi_section() takes
+    # care of the PSI standard header (version/section_number/last_section_number)
+    # and the CRC; the body below is the EIT-specific portion that follows.
+    eit_body = (struct.pack('>H', 0x0001)                       # transport_stream_id
+                + struct.pack('>H', 0x0001)                     # original_network_id
+                + bytes([0x00, 0x4E]))                          # seg_last_sn + last_table_id
+    eit = psi_packet(psi_section(0x4E, 0x0010, eit_body), pid=0x0012)
+    null = make_ts_packet(0x1FFF, b'')
+    seed = pat + tdt + tot + eit + null * 4
+    pad = (-len(seed)) % 188
+    if pad: seed += b'\x00' * pad
+    _write(os.path.join(seed_dir, 'tdt_tot_eit.ts'), seed)
+
+
+# ──────────────────────────────────────────────────
+#  OGG Vorbis identification (ogg.c + xiph_metadata)
+# ──────────────────────────────────────────────────
+#
+# An OGG seed carrying a Vorbis 'identification' packet, a 'comment' packet
+# and a 'setup' packet exercises the Vorbis stream-type detection in ogg.c
+# (Ogg_LogicalStreamSetup) and the xiph_metadata.c VorbisComment parser.
+
+def gen_ogg_vorbis(root):
+    seed_dir = os.path.join(root, 'seeds', 'ogg')
+    os.makedirs(seed_dir, exist_ok=True)
+    # Identification: type 0x01 + 'vorbis' + version(0) + channels(2)
+    # + samplerate(44100) + bitrate min/nominal/max + blocksize byte + 1
+    ident = (bytes([0x01]) + b'vorbis'
+             + struct.pack('<I', 0)
+             + bytes([2])
+             + struct.pack('<I', 44100)
+             + struct.pack('<iii', -1, 128000, -1)
+             + bytes([0x88])
+             + bytes([1]))
+    # Comment: type 0x03 + 'vorbis' + vendor + N comments
+    vendor = b'VLC fuzz seed'
+    comments = [b'TITLE=ABC', b'ARTIST=XYZ', b'COVERART=00']
+    comment = (bytes([0x03]) + b'vorbis'
+               + struct.pack('<I', len(vendor)) + vendor
+               + struct.pack('<I', len(comments)))
+    for c in comments:
+        comment += struct.pack('<I', len(c)) + c
+    comment += bytes([1])
+    # Setup packet (minimal stub; not strictly valid but exercises parsing).
+    setup = bytes([0x05]) + b'vorbis' + bytes(32)
+    page1 = ogg_page([ident], serial=0x12345678, page_seq=0, granule=0, bos=True)
+    page2 = ogg_page([comment, setup], serial=0x12345678, page_seq=1, granule=0)
+    # Audio data page.
+    audio_payload = bytes(32)
+    page3 = ogg_page([audio_payload], serial=0x12345678, page_seq=2,
+                     granule=1024, eos=True)
+    _write(os.path.join(seed_dir, 'vorbis_full.ogg'), page1 + page2 + page3)
+
+
+# ──────────────────────────────────────────────────
 #  main
 # ──────────────────────────────────────────────────
 
@@ -3703,6 +4730,20 @@ def main():
     gen_ogg(root)
     gen_mkv(root)
     gen_mp4_extras(root)
+    # New generators targeting low-coverage demuxers/codecs.
+    gen_asf_extras(root)
+    gen_ts_descriptors(root)
+    gen_mp4_codecs(root)
+    gen_nsv(root)
+    gen_mjpeg(root)
+    gen_flac_native(root)
+    gen_ty_extras(root)
+    gen_lpcm_ps(root)
+    gen_oggseek(root)
+    gen_mp4_stbl_extras(root)
+    gen_mp4_fragmented(root)
+    gen_ts_si_extras(root)
+    gen_ogg_vorbis(root)
 
 
 if __name__ == '__main__':
