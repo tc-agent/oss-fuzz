@@ -38,9 +38,18 @@ else
 fi
 
 # build fuzzers
+#
+# NO_RUST=YesPlease: git now builds some subsystems (e.g. varint) in Rust by
+# default, providing the symbols via the Rust static library appended to
+# GITLIBS. The "GITLIBS=libgit.a" override below (used to drop common-main.o,
+# which carries a main() that would shadow the fuzzing engine's) also drops
+# that Rust library, leaving encode_varint/decode_varint undefined at link
+# time. Disabling Rust keeps the C implementations in libgit.a so the override
+# remains self-contained.
 make -j$(nproc) CC=$CC CXX=$CXX CFLAGS="$CFLAGS" \
   FUZZ_CXXFLAGS="$CXXFLAGS" \
   LIB_FUZZING_ENGINE="$FUZZING_ENGINE_FLAGS" \
+  NO_RUST=YesPlease \
   GITLIBS=libgit.a fuzz-all
 
 FUZZERS=""
