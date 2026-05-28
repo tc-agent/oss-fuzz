@@ -1,0 +1,60 @@
+# Methods
+"GET "
+"POST "
+"HEAD "
+"PUT "
+"DELETE "
+"OPTIONS "
+"PATCH "
+"CONNECT "
+"PROPFIND "
+"PROPPATCH "
+"MKCOL "
+"COPY "
+"MOVE "
+"LOCK "
+"UNLOCK "
+"TRACE "
+
+# HTTP versions / line endings
+" HTTP/1.0\x0d\x0a"
+" HTTP/1.1\x0d\x0a"
+" HTTP/0.9\x0d\x0a"
+"\x0d\x0a"
+
+# Common headers
+"Host:"
+"User-Agent:"
+"Content-Length:"
+"Content-Type:"
+"Transfer-Encoding: chunked\x0d\x0a"
+"Connection:"
+"Connection: keep-alive\x0d\x0a"
+"Connection: close\x0d\x0a"
+"Cookie:"
+"Authorization:"
+"X-Forwarded-For:"
+"Expect: 100-continue\x0d\x0a"
+"Accept-Encoding: gzip\x0d\x0a"
+
+# URI patterns
+"http://"
+"https://"
+"://"
+"%20"
+"%2e"
+"%2f"
+"/../"
+"/./"
+"//"
+
+# Chunked transfer encoding tokens
+"0\x0d\x0a"
+"\x0d\x0a0\x0d\x0a\x0d\x0a"
+";"
+
+# Status lines
+"HTTP/1.1 200 OK\x0d\x0a"
+"HTTP/1.0 404 Not Found\x0d\x0a"
+"HTTP/1.1 301 "
+"HTTP/1.1 500 "
