@@ -37,8 +37,15 @@ make -j$(nproc)
 make install
 
 # Compile the shared fuzzer_utils.c
+#
+# ./include/git2 is deliberately kept off the include path: libgit2 ships a
+# Visual Studio compatibility shim at include/git2/stdint.h, and exposing that
+# directory makes the system <inttypes.h> resolve `#include <stdint.h>` to the
+# shim, which is empty on non-MSVC compilers and leaves the standard integer
+# types undefined. ./gen_headers is where libgit2's CMake puts the configured
+# git2_features.h / experimental.h.
 $CC $CFLAGS -c \
-    -I./src -I./src/util -I./include/ -I./include/git2 \
+    -I./src -I./src/util -I./include/ -I./gen_headers \
     -I../src/libgit2 -I../src/util -I../include \
     -I../fuzzers \
     ../fuzzers/fuzzer_utils.c -o "$WORK/fuzzer_utils.o"
@@ -48,7 +55,7 @@ do
     fuzzer_name=$(basename "${fuzzer%.c}")
 
     $CC $CFLAGS -c \
-        -I./src -I./src/util -I./include/ -I./include/git2 \
+        -I./src -I./src/util -I./include/ -I./gen_headers \
         -I../src/libgit2 -I../src/util -I../include \
         -I../fuzzers \
         "$fuzzer" -o "$WORK/$fuzzer_name.o"
