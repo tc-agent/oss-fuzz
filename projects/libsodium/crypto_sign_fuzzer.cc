@@ -14,6 +14,7 @@
 
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sodium.h>
 
 #include "fake_random.h"
@@ -63,6 +64,54 @@ extern "C" int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size) {
   assert(err == 0);
 
   free(sig);
+
+  // Ed25519ph (pre-hash): streaming sign + verify
+  crypto_sign_ed25519ph_state ph_state;
+  crypto_sign_ed25519ph_init(&ph_state);
+  if (msg_len > 0) {
+    crypto_sign_ed25519ph_update(&ph_state, msg, msg_len / 2);
+    crypto_sign_ed25519ph_update(&ph_state, msg + msg_len / 2,
+                                 msg_len - msg_len / 2);
+  }
+  unsigned char sig3[crypto_sign_BYTES];
+  unsigned long long sig3_len;
+  err = crypto_sign_ed25519ph_final_create(&ph_state, sig3, &sig3_len, sk);
+  assert(err == 0);
+  crypto_sign_ed25519ph_init(&ph_state);
+  if (msg_len > 0) {
+    crypto_sign_ed25519ph_update(&ph_state, msg, msg_len / 2);
+    crypto_sign_ed25519ph_update(&ph_state, msg + msg_len / 2,
+                                 msg_len - msg_len / 2);
+  }
+  err = crypto_sign_ed25519ph_final_verify(&ph_state, sig3, pk);
+  assert(err == 0);
+
+  // Combined sign/open (signature prepended to message)
+  unsigned char *sm = (unsigned char *)malloc(crypto_sign_BYTES + msg_len);
+  unsigned long long sm_len;
+  err = crypto_sign(sm, &sm_len, msg, msg_len, sk);
+  assert(err == 0);
+  unsigned char *m_out = (unsigned char *)malloc(sm_len);
+  unsigned long long m_out_len;
+  err = crypto_sign_open(m_out, &m_out_len, sm, sm_len, pk);
+  assert(err == 0);
+  assert(m_out_len == msg_len);
+  free(sm);
+  free(m_out);
+
+  // Curve25519 derivations from Ed25519 keys + sk->seed/pk recovery
+  unsigned char c25519_pk[crypto_scalarmult_curve25519_BYTES];
+  unsigned char c25519_sk[crypto_scalarmult_curve25519_BYTES];
+  crypto_sign_ed25519_pk_to_curve25519(c25519_pk, pk);
+  crypto_sign_ed25519_sk_to_curve25519(c25519_sk, sk);
+
+  unsigned char seed_back[crypto_sign_ed25519_SEEDBYTES];
+  crypto_sign_ed25519_sk_to_seed(seed_back, sk);
+  assert(memcmp(seed_back, seed, crypto_sign_ed25519_SEEDBYTES) == 0);
+
+  unsigned char pk_back[crypto_sign_ed25519_PUBLICKEYBYTES];
+  crypto_sign_ed25519_sk_to_pk(pk_back, sk);
+  assert(memcmp(pk_back, pk, crypto_sign_ed25519_PUBLICKEYBYTES) == 0);
 
   return 0;
 }
