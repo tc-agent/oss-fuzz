@@ -1,0 +1,3 @@
+print-quality=5 print-color-mode=color print-scaling=auto fit-to-page=true
+output-bin=top finishings=3,4 multiple-document-handling=separate-documents-collated-copies
+job-sheets=none,none page-border=double presentation-direction-number-up=tobottom-toright
