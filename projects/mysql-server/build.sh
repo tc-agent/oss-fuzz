@@ -26,7 +26,21 @@ if [[ $SANITIZER = *undefined* ]]; then
 fi
 # not handling yet WITH_MSAN nor WITH_TSAN
 cmake .. -DBUILD_SHARED_LIBS=OFF -Dprotobuf_BUILD_SHARED_LIBS=OFF -DWITH_SSL=system -DCMAKE_INSTALL_PREFIX=$OUT/mysql -DWITH_LD=lld $MY_SANITIZER -DCMAKE_VERBOSE_MAKEFILE=ON
-make -j$(nproc)
+
+# Build only the libFuzzer harness targets (and their dependency graph)
+# rather than the entire server + unit-test tree (~4000 object files).
+# The target list is discovered from `make help` (matches routertest_fuzz_*)
+# so it tracks upstream as harnesses are added or removed.
+FUZZ_TARGETS=$(make help 2>/dev/null \
+    | awk '/^\.\.\. routertest_fuzz_/ {sub(/^\.\.\. /, ""); print $1}' \
+    | sort -u)
+if [ -z "$FUZZ_TARGETS" ]; then
+    echo "ERROR: no libFuzzer harness targets found" >&2
+    exit 1
+fi
+echo "Building harnesses:" $FUZZ_TARGETS
+make -j$(nproc) $FUZZ_TARGETS
+
 mkdir -p $OUT/lib/
 cp library_output_directory/libmysql*.so.* $OUT/lib/
 (
