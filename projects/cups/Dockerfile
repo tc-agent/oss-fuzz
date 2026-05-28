@@ -20,4 +20,6 @@ RUN git clone --depth 1 https://github.com/OpenPrinting/fuzzing.git
 RUN cp $SRC/fuzzing/projects/cups/oss_fuzz_build.sh $SRC/build.sh
 COPY run_tests.sh *.diff $SRC/
 RUN cd $SRC/fuzzing && git apply $SRC/test_patch.diff
+COPY harnesses/ $SRC/fuzzing/projects/cups/fuzzer/
+COPY seeds/ $SRC/fuzzing/projects/cups/seeds/
 WORKDIR $SRC/cups
