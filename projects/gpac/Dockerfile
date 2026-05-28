@@ -18,5 +18,6 @@ FROM gcr.io/oss-fuzz-base/base-builder
 RUN apt-get update && apt-get install -y build-essential pkg-config libz-dev
 RUN git clone https://github.com/gpac/gpac && cd gpac && git submodule update --init --remote --recursive
 
-COPY build.sh $SRC/
+COPY build.sh gen_fuzz_seeds.py $SRC/
+COPY harnesses $SRC/harnesses/
 WORKDIR $SRC/gpac

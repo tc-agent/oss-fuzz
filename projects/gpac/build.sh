@@ -64,3 +64,25 @@ for f in $fuzzers; do
         cp $SRC/gpac/testsuite/oss-fuzzers/${fuzzerName}.options $OUT/
     fi
 done
+
+# Extra harnesses maintained alongside the oss-fuzz integration. The upstream
+# harnesses only cover content-probed formats; these add extension-driven
+# coverage of GPAC's text/scene source filters and the remux/render pipeline.
+for f in $SRC/harnesses/fuzz_*.c; do
+    [ -e "$f" ] || continue
+    fuzzerName=$(basename $f .c)
+    echo "Building fuzzer $fuzzerName"
+
+    $CC $CFLAGS -I./include -I./ -DGPAC_HAVE_CONFIG_H -c $f
+    $CXX $CXXFLAGS $LIB_FUZZING_ENGINE $fuzzerName.o -o $OUT/$fuzzerName \
+      ./bin/gcc/libgpac_static.a \
+      -lm -lz -lpthread -lssl -lcrypto -DGPAC_HAVE_CONFIG_H
+
+    if [ -f "$SRC/harnesses/${fuzzerName}.options" ]; then
+        cp $SRC/harnesses/${fuzzerName}.options $OUT/
+    fi
+done
+
+# Build seed corpora for the broad harnesses: synthesised probe-valid files
+# for ~40 formats plus the real media samples already in the testsuite.
+python3 $SRC/gen_fuzz_seeds.py $SRC/gpac/testsuite $OUT
