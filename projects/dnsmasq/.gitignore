@@ -1,0 +1,4 @@
+corpus/
+fuzzer_stats/
+scripts/__pycache__/
+seeds/

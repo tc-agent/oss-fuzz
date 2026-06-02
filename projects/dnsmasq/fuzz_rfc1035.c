@@ -19,9 +19,14 @@ void FuzzExtractTheAddress(const uint8_t **data2, size_t *size2) {
   const uint8_t *data = *data2;
   size_t size = *size2;
 
-  char *new_name = NULL;
-  new_name = get_len_null_terminated(&data, &size, MAXDNAME);
+  /* Consume MAXDNAME bytes of fuzz input via the GC-tracked helper, then
+     allocate a larger scratch buffer for extract_name (NAME_ESCAPE doubles
+     output length). */
+  if (gb_get_len_null_terminated(&data, &size, MAXDNAME) == NULL) return;
+  char *new_name = (char *)malloc(MAXDNAME * 4);
+  if (!new_name) return;
   pointer_arr[pointer_idx++] = (void*)new_name;
+  new_name[0] = 'a'; new_name[1] = '\0';
 
   int is_sign = get_int(&data, &size);
   int check_rebind = get_int(&data, &size);
@@ -32,10 +37,10 @@ void FuzzExtractTheAddress(const uint8_t **data2, size_t *size2) {
     memset(new_data, 0, size);
     memcpy(new_data, data, size);
     pointer_arr[pointer_idx++] = (void*)new_data;
-    
-    time_t now; 
-    int doctored = 0;
-    extract_addresses((struct dns_header *)new_data, size, new_name, now, NULL, NULL, is_sign, check_rebind, 0, secure, &doctored);
+
+    time_t now = 0;
+    extract_addresses((struct dns_header *)new_data, size, new_name, now, NULL, NULL, check_rebind, 0, secure);
+    (void)is_sign;
   }
 }
 
@@ -61,7 +66,8 @@ void FuzzAnswerTheRequest(const uint8_t **data2, size_t *size2) {
     memcpy(new_data, data, size);
     pointer_arr[pointer_idx++] = (void*)new_data;
 
-    answer_request((struct dns_header *)new_data, new_data+size, size, local_addr, local_netmask, now, i1, i2, i3);
+    int stale = 0, filtered = 0;
+    answer_request((struct dns_header *)new_data, new_data+size, size, local_addr, local_netmask, now, i1, i2, i3, &stale, &filtered);
   }
 
 }
@@ -125,7 +131,8 @@ void FuzzExtractRequest(const uint8_t **data2, size_t *size2) {
     pointer_arr[pointer_idx++] = (void*)new_data;
 
     unsigned short typeb;
-    extract_request((struct dns_header *)new_data, size, new_name, &typeb);
+    unsigned short class2b;
+    extract_request((struct dns_header *)new_data, size, new_name, &typeb, &class2b);
   }
 }
 
@@ -154,15 +161,18 @@ void FuzzResizePacket(const uint8_t **data2, size_t *size2) {
   size_t size = *size2;
 
   char *new_packet = malloc(50);
+  if (new_packet == NULL) return;
 
   if (size > (sizeof(struct dns_header) + 50)) {
-    char *new_data = malloc(size+1);
-    memset(new_data, 0, size);
+    /* resize_packet's memmove can append up to hlen (50) bytes past the
+       answer section, so allocate the dns_header buffer with that headroom. */
+    size_t buf_sz = size + 64;
+    char *new_data = malloc(buf_sz);
+    memset(new_data, 0, buf_sz);
     memcpy(new_data, data, size);
-    new_data[size] = '\0';
     pointer_arr[pointer_idx++] = (void*)new_data;
 
-    resize_packet((struct dns_header *)new_data, size, (unsigned char*)new_packet, 50);    
+    resize_packet((struct dns_header *)new_data, size, (unsigned char*)new_packet, 50);
   }
   free(new_packet);
 }
@@ -186,12 +196,18 @@ void FuzzSetupReply(const uint8_t **data2, size_t *size2) {
 void FuzzCheckForBogusWildcard(const uint8_t **data2, size_t *size2) {
   const uint8_t *data = *data2;
   size_t size = *size2;
-  
-  char *nname = gb_get_len_null_terminated(&data, &size, MAXDNAME);
-  if (nname == NULL) {
+
+  /* check_for_bogus_wildcard re-extracts the name into the provided buffer
+     via extract_name, which can write up to ~2x bytes via NAME_ESCAPE. Use
+     a large scratch buffer instead of the MAXDNAME-sized fuzz string. */
+  if (gb_get_len_null_terminated(&data, &size, MAXDNAME) == NULL) {
     return;
   }
-
+  char *nname = (char *)malloc(MAXDNAME * 4);
+  if (!nname) return;
+  pointer_arr[pointer_idx++] = (void *)nname;
+  nname[0] = 'a';
+  nname[1] = '\0';
 
   if (size > (sizeof(struct dns_header) + 50)) {
     char *new_data = malloc(size+1);
@@ -200,7 +216,7 @@ void FuzzCheckForBogusWildcard(const uint8_t **data2, size_t *size2) {
     new_data[size] = '\0';
     pointer_arr[pointer_idx++] = (void*)new_data;
 
-    time_t now;
+    time_t now = 0;
     check_for_bogus_wildcard((struct dns_header *)new_data, size, nname, now);
   }
 }
@@ -208,19 +224,15 @@ void FuzzCheckForBogusWildcard(const uint8_t **data2, size_t *size2) {
 
 /*
  * Fuzzer entrypoint.
- */ 
-
+ */
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   daemon = NULL;
-  //printf("Running fuzzer\n");
   if (size < 1) {
     return 0;
   }
 
-  // Initialize mini garbage collector
   gb_init();
 
-  // Get a value we can use to decide which target to hit.
   int i = (int)data[0];
   data += 1;
   size -= 1;
@@ -231,41 +243,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     cache_init();
     blockdata_init();
 
-    //i = 7;
 #define TS 9
-    if ((i % TS) == 0) {
-      FuzzExtractTheAddress(&data,&size);
-    }
-    else if ((i % TS) == 1) {
-      FuzzAnswerTheRequest(&data,&size);
-    }
-    else if ((i % TS) == 2) {
-      FuzzCheckLocalDomain(&data, &size);
-    }
-    else if ((i % TS) == 3) {
-      FuzzExtractRequest(&data, &size);
-    }
-    else if ((i % TS) == 4) {
-      FuzzArpaName2Addr(&data, &size);
-    }
-    else if ((i %TS) == 5) {
-      FuzzResizePacket(&data, &size);
-    }
-    else if ((i %TS) == 6) {
-      FuzzSetupReply(&data, &size);
-    }
-    else if ((i % TS) == 7) {
-      FuzzCheckForBogusWildcard(&data, &size);
-    }
-    else {
-      FuzzIgnoredAddress(&data, &size);
-    } 
+    int t = i % TS;
+    if (t == 0)       FuzzExtractTheAddress(&data, &size);
+    else if (t == 1)  FuzzAnswerTheRequest(&data, &size);
+    else if (t == 2)  FuzzCheckLocalDomain(&data, &size);
+    else if (t == 3)  FuzzExtractRequest(&data, &size);
+    else if (t == 4)  FuzzArpaName2Addr(&data, &size);
+    else if (t == 5)  FuzzResizePacket(&data, &size);
+    else if (t == 6)  FuzzSetupReply(&data, &size);
+    else if (t == 7)  FuzzCheckForBogusWildcard(&data, &size);
+    else              FuzzIgnoredAddress(&data, &size);
+
     cache_start_insert();
     fuzz_blockdata_cleanup();
   }
 
-  // Free data in mini garbage collector.
   gb_cleanup();
-
   return 0;
 }

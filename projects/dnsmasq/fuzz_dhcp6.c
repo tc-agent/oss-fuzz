@@ -12,55 +12,63 @@ limitations under the License.
 
 #include "fuzz_header.h"
 
-/* 
- * Targets answer_auth
+/*
+ * Targets dhcp6_reply directly. dhcp6_packet() does a blocking recvmsg()
+ * on a real socket which is unusable inside libFuzzer.
  */
-  static int val213 = 0;
-void FuzzDhcp(const uint8_t **data2, size_t *size2) {
+void FuzzDhcp6(const uint8_t **data2, size_t *size2) {
   const uint8_t *data = *data2;
   size_t size = *size2;
-  
 
-  time_t now;
-  int pxe_fd = 0;
-
-  struct iovec *dhpa = malloc(sizeof(struct iovec));
-  if (dhpa == NULL) return;
-
-  char *content = malloc(300);
-  if (content == NULL) {
-    free(dhpa);
+  if (size < 32)
     return;
+
+  size_t buf_sz = 1024;
+  char *buf = (char *)malloc(buf_sz);
+  if (!buf) return;
+  memset(buf, 0, buf_sz);
+
+  size_t copy_sz = size > buf_sz ? buf_sz : size;
+  memcpy(buf, data, copy_sz);
+
+  daemon->dhcp_packet.iov_base = buf;
+  daemon->dhcp_packet.iov_len = buf_sz;
+  daemon->outpacket.iov_base = NULL;
+  daemon->outpacket.iov_len = 0;
+
+  /* multicast_dest must be set for non-RELAY-FORW messages, otherwise
+     dhcp6_reply bails out immediately. */
+  int multicast_dest = 1, interface = 0;
+  struct in6_addr fallback, ll_addr, ula_addr, client_addr;
+  memset(&fallback, 0, sizeof(fallback));
+  memset(&ll_addr, 0, sizeof(ll_addr));
+  memset(&ula_addr, 0, sizeof(ula_addr));
+  memset(&client_addr, 0, sizeof(client_addr));
+
+  time_t now = 0;
+  dhcp6_reply(daemon->dhcp6, multicast_dest, interface, (char *)"lo",
+              &fallback, &ll_addr, &ula_addr, copy_sz,
+              &client_addr, now);
+
+  free(daemon->dhcp_packet.iov_base);
+  daemon->dhcp_packet.iov_base = NULL;
+  if (daemon->outpacket.iov_base) {
+    free(daemon->outpacket.iov_base);
+    daemon->outpacket.iov_base = NULL;
   }
-  
-  dhpa->iov_base = content;
-  dhpa->iov_len = 300;
-
-  daemon->dhcp_packet = *dhpa;
-
-  syscall_data = data;
-  syscall_size = size;
-
-  dhcp6_packet(now);
-
-  free(dhpa);
-  free(content);
 }
 
 /*
  * Fuzzer entrypoint.
- */ 
+ */
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   daemon = NULL;
   if (size < 1) {
     return 0;
   }
 
-  // Initialize mini garbage collector
   gb_init();
 
-  // Get a value we can use to decide which target to hit.
-  int i = (int)data[0];
   data += 1;
   size -= 1;
 
@@ -70,14 +78,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     cache_init();
     blockdata_init();
 
-		FuzzDhcp(&data, &size);
+    FuzzDhcp6(&data, &size);
 
     cache_start_insert();
     fuzz_blockdata_cleanup();
   }
 
-  // Free data in mini garbage collector.
   gb_cleanup();
-
   return 0;
 }
