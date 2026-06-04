@@ -19,7 +19,9 @@
 # code.
 CFLAGS="${CFLAGS} -DVALGRIND=1"
 ./configure
-make -j6 all unittest
+# Skip "all" — links daemon binary which calls pthread_set_name_np (BSD-only symbol,
+# undefined on Linux despite configure detecting it); lib+unittest suffice for fuzzing.
+make -j6 lib unittest
 
 $CC $CFLAGS -I. -DSRCDIR=. -c -o parse_packet_fuzzer.o parse_packet_fuzzer.c
 $CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_1.o fuzz_1.c
