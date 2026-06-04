@@ -42,13 +42,13 @@ fuzzer: simple_query_fuzzer \
 	protocol_fuzzer
 
 simple_query_fuzzer json_parser_fuzzer: %: %.o fuzzer_initialize.o $(OBJS_FUZZERS)
-	$(CXX) $(CFLAGS) $(call expand_subsys,$^) -o $@ -l:libicui18n.a -l:libicuuc.a -l:libicudata.a $(LIB_FUZZING_ENGINE) -lz -lpthread -ldl -lrt
+	$(CXX) $(CFLAGS) $(call expand_subsys,$^) -o $@ -L/opt/icu66/lib -l:libicui18n.a -l:libicuuc.a -l:libicudata.a $(LIB_FUZZING_ENGINE) -lz -lpthread -ldl -lrt
 
 simple_query_fuzzer.o json_parser_fuzzer.o protocol_fuzzer.o fuzzer_initialize.o: %.o: %.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $^
 
 protocol_fuzzer: %: %.o $(OBJS_FUZZERS)
-	$(CXX) $(CFLAGS) $(call expand_subsys,$^) -o $@ -l:libicui18n.a -l:libicuuc.a -l:libicudata.a $(LIB_FUZZING_ENGINE) -Wl,--wrap=exit -Wl,--wrap=pq_getbyte -lz -lpthread -ldl -lrt
+	$(CXX) $(CFLAGS) $(call expand_subsys,$^) -o $@ -L/opt/icu66/lib -l:libicui18n.a -l:libicuuc.a -l:libicudata.a $(LIB_FUZZING_ENGINE) -Wl,--wrap=exit -Wl,--wrap=pq_getbyte -lz -lpthread -ldl -lrt
 
 dbfuzz: dbfuzz.o | submake-libpgport temp-install
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@ \

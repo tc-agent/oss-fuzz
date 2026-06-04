@@ -28,10 +28,16 @@ cd bld
 wget https://github.com/unicode-org/icu/releases/download/release-66-1/icu4c-66_1-src.tgz
 tar -xzf icu4c-66_1-src.tgz
 pushd icu/source
-./configure --prefix=/opt/icu66  --enable-renaming CC=clang CXX=clang++ CFLAGS="" CXXFLAGS=""
+./configure --prefix=/opt/icu66  --enable-renaming --enable-static CC=clang CXX=clang++ CFLAGS="" CXXFLAGS=""
 make -j$(nproc)
 make install
 popd
+
+# Register /opt/icu66/lib with the dynamic linker so initdb can find
+# libicuuc.so.66 at runtime even when invoked via the dbfuzz Makefile rule
+# (which hard-overrides LD_LIBRARY_PATH).
+echo /opt/icu66/lib > /etc/ld.so.conf.d/icu66.conf
+ldconfig
 
 # Add environment flags for icu 66
 export PKG_CONFIG_PATH=/opt/icu66/lib/pkgconfig
