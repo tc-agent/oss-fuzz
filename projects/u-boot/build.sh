@@ -17,10 +17,18 @@
 
 cd $SRC/u-boot
 
-# 0. Patch u-boot source
+# 0. Copy custom harnesses into the source tree.
+# They live at $SRC/ (not $SRC/u-boot/) so they survive local-source mounts
+# in the upstream CI (which mounts the PR checkout over $SRC/u-boot/).
+cp $SRC/efi_load_image.c $SRC/u-boot/test/fuzz/
+cp $SRC/fit_image_load.c $SRC/u-boot/test/fuzz/
+cp $SRC/image_decomp.c $SRC/u-boot/test/fuzz/
+cp $SRC/fuzz_fs.c $SRC/u-boot/test/fuzz/
+
+# 1. Patch u-boot source
 git apply $SRC/oss-fuzz.patch
 
-# 1. Configure: sandbox + fuzz + all fuzzer target dependencies
+# 2. Configure: sandbox + fuzz + all fuzzer target dependencies
 make sandbox_defconfig CC="$CC" HOSTCC="$CC"
 ./scripts/config --enable CONFIG_FUZZ
 ./scripts/config --enable CONFIG_DM_FUZZING_ENGINE
@@ -40,9 +48,12 @@ make sandbox_defconfig CC="$CC" HOSTCC="$CC"
 # Filesystems
 ./scripts/config --enable CONFIG_FS_BTRFS
 ./scripts/config --enable CONFIG_CMD_BTRFS
+./scripts/config --enable CONFIG_CMD_FAT
+./scripts/config --enable CONFIG_CMD_EXT4
+./scripts/config --enable CONFIG_CMD_SQUASHFS
 make olddefconfig CC="$CC" HOSTCC="$CC"
 
-# 2. Build u-boot sandbox
+# 3. Build u-boot sandbox
 #    NO_PYTHON=1 skips pylibfdt (_libfdt.so) meaning no shared libraries.
 #    CONFIG_BINMAN= prevents binman (needs pylibfdt) from running.
 #    -fintegrated-as avoids clang/gas assembler incompatibility.
@@ -52,22 +63,34 @@ make olddefconfig CC="$CC" HOSTCC="$CC"
 make -j$(nproc) CROSS_COMPILE="" CC="$CC" HOSTCC="$CC" NO_PYTHON=1 \
     CONFIG_BINMAN= KCFLAGS="$CFLAGS -fintegrated-as"
 
-# 3. Install all fuzzers (same binary, different names)
+# 4. Install all fuzzers (same binary, different names)
 FUZZERS="
     fuzz_efi_load_image
     fuzz_fit_image_load
     fuzz_image_decomp
-    fuzz_btrfs
+    fuzz_fs
 "
 
 for fuzzer in $FUZZERS; do
     cp u-boot $OUT/$fuzzer
-
+    # fuzz_fs needs a larger max_len so 80KB+ filesystem seeds aren't
+    # truncated by libFuzzer's dynamic length growth.
+    if [ "$fuzzer" = "fuzz_fs" ]; then
+        EXTRA_LIBFUZZER="max_len=131072"
+    else
+        EXTRA_LIBFUZZER=""
+    fi
     cat > $OUT/$fuzzer.options <<EOF
 [libfuzzer]
 detect_leaks=0
+$EXTRA_LIBFUZZER
 [asan]
 detect_leaks=0
 EOF
 done
+
+# Package the filesystem seed corpus alongside fuzz_fs. base-runner unzips
+# this into the corpus dir on each fuzzer start, so seeds survive
+# libFuzzer's corpus minimisation and re-seed every run.
+(cd $SRC/seeds_fuzz_fs && zip -qr $OUT/fuzz_fs_seed_corpus.zip .)
 
