@@ -1,0 +1,27 @@
+# PROXY protocol v1 keywords
+pp_proxy="PROXY "
+pp_tcp4="TCP4 "
+pp_tcp6="TCP6 "
+pp_unknown="UNKNOWN\x0d\x0a"
+pp_crlf="\x0d\x0a"
+
+# PROXY protocol v2 signature (12 bytes)
+pp_v2sig="\x0d\x0a\x0d\x0a\x00\x0d\x0aQUIT\x0a"
+# v2 version+command bytes
+pp_v2_local="\x20"
+pp_v2_proxy="\x21"
+# v2 address family+transport bytes
+pp_af_unspec="\x00"
+pp_tcp4_af="\x11"
+pp_udp4_af="\x12"
+pp_tcp6_af="\x21"
+pp_udp6_af="\x22"
+pp_tcp_unix="\x31"
+pp_udp_unix="\x32"
+
+# TLV type bytes
+pp_tlv_alpn="\x01"
+pp_tlv_authority="\x02"
+pp_tlv_unique_id="\x05"
+pp_tlv_ssl="\x20"
+pp_tlv_netns="\x30"

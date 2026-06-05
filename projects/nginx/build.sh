@@ -31,3 +31,8 @@ make -f objs/Makefile fuzzers
 
 cp objs/*_fuzzer $OUT/
 cp $SRC/fuzz/*.dict $OUT/
+
+# Seed corpora
+zip -j $OUT/http_v2_fuzzer_seed_corpus.zip $SRC/fuzz/seeds/http_v2_fuzzer/*
+zip -j $OUT/http_parse_fuzzer_seed_corpus.zip $SRC/fuzz/seeds/http_parse_fuzzer/*
+zip -j $OUT/proxy_protocol_fuzzer_seed_corpus.zip $SRC/fuzz/seeds/proxy_protocol_fuzzer/*

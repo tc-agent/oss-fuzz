@@ -24,4 +24,5 @@ RUN (mkdir LPM && cd LPM && cmake ../libprotobuf-mutator -GNinja -DLIB_PROTO_MUT
 
 WORKDIR nginx
 COPY fuzz $SRC/fuzz
+COPY seeds $SRC/fuzz/seeds
 COPY build.sh add_fuzzers.diff make_fuzzers  $SRC/

@@ -1,0 +1,52 @@
+# HTTP/2 frame types and common fields
+# Connection preface
+h2_preface="PRI * HTTP/2.0\x0d\x0a\x0d\x0aSM\x0d\x0a\x0d\x0a"
+
+# Frame type bytes
+h2_data="\x00"
+h2_headers="\x01"
+h2_priority="\x02"
+h2_rst_stream="\x03"
+h2_settings="\x04"
+h2_push_promise="\x05"
+h2_ping="\x06"
+h2_goaway="\x07"
+h2_window_update="\x08"
+h2_continuation="\x09"
+
+# HPACK static table header names
+h2_hdr_method=":method"
+h2_hdr_path=":path"
+h2_hdr_scheme=":scheme"
+h2_hdr_status=":status"
+h2_hdr_authority=":authority"
+h2_hdr_content_type="content-type"
+h2_hdr_content_length="content-length"
+h2_hdr_accept="accept"
+h2_hdr_accept_encoding="accept-encoding"
+h2_hdr_accept_language="accept-language"
+h2_hdr_user_agent="user-agent"
+h2_hdr_cookie="cookie"
+h2_hdr_host="host"
+h2_hdr_authorization="authorization"
+
+# HPACK static table header values
+h2_method_get="GET"
+h2_method_post="POST"
+h2_path_root="/"
+h2_scheme_http="http"
+h2_scheme_https="https"
+h2_status_200="200"
+h2_status_204="204"
+h2_status_206="206"
+h2_status_304="304"
+h2_status_400="400"
+h2_status_404="404"
+h2_status_500="500"
+
+# HPACK Huffman prefix bytes
+h2_hpack_indexed="\x80"
+h2_hpack_literal_inc="\x40"
+h2_hpack_literal="\x00"
+h2_hpack_int_cont="\x7f"
+h2_hpack_huffman="\xff"
