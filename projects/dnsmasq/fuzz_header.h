@@ -11,11 +11,18 @@ limitations under the License.
 */
 
 #include "dnsmasq.h"
+#include <setjmp.h>
 
-extern void fuzz_blockdata_cleanup();
+static void fuzz_blockdata_cleanup(void) { blockdata_init(); }
+
+/* die() is renamed to die_orig() in log.c at build time; a fuzz-aware
+   replacement is appended to dnsmasq.c so it ends up inside libdnsmasq.a.
+   Harnesses arm fuzz_die_active to make die() longjmp instead of exit(). */
+extern jmp_buf fuzz_die_jmp;
+extern int fuzz_die_active;
 
 // Simple garbage collector 
-#define GB_SIZE 100
+#define GB_SIZE 200
 
 void *pointer_arr[GB_SIZE];
 static int pointer_idx = 0;
@@ -31,11 +38,13 @@ void gb_init() {
 }
 
 void gb_cleanup() {
+  void *d = (void *)daemon;
   for(int i = 0; i < GB_SIZE; i++) {
-    if (pointer_arr[i] != NULL) {
+    if (pointer_arr[i] != NULL && pointer_arr[i] != d) {
       free(pointer_arr[i]);
     }
   }
+  if (d) { free(d); daemon = NULL; }
 }
 
 char *get_len_null_terminated(const uint8_t **data, size_t *size, size_t to_get) {
@@ -46,6 +55,14 @@ char *get_len_null_terminated(const uint8_t **data, size_t *size, size_t to_get)
   char *new_s = malloc(to_get + 1);
   memcpy(new_s, *data, to_get);
   new_s[to_get] = '\0';
+
+  /* Guarantee strlen > 0. dnsmasq's hostname_issubdomain and friends read
+     past the NUL terminator on zero-length input. Rather than mask real
+     bugs, ensure init_daemon never seeds the daemon struct with empty
+     strings (which would only happen for fuzz inputs starting with NUL). */
+  if (new_s[0] == '\0') {
+    new_s[0] = 'a';
+  }
 
   *data = *data+to_get;
   *size -= to_get;
@@ -247,9 +264,17 @@ int init_daemon(const uint8_t **data2, size_t *size2) {
   daemon->local_ttl = get_int(&data, &size);
   daemon->min_cache_ttl = get_int(&data, &size);
 
-  // daemon->namebuff.
-  char *daemon_namebuff = gb_get_len_null_terminated(&data, &size, MAXDNAME);
+  // daemon->namebuff and workspacename. Allocated larger than MAXDNAME
+  // because extract_name can write 2 bytes per character via NAME_ESCAPE.
+  char *daemon_namebuff = gb_alloc_data(MAXDNAME * 4);
+  CLEAN_IF_NULL(daemon_namebuff)
   daemon->namebuff = daemon_namebuff;
+  char *daemon_workspacename = gb_alloc_data(MAXDNAME * 4);
+  CLEAN_IF_NULL(daemon_workspacename)
+  daemon->workspacename = daemon_workspacename;
+  /* skip MAXDNAME bytes of fuzz input that the original code consumed,
+     keep the corpus byte stream aligned. */
+  if (size >= MAXDNAME) { data += MAXDNAME; size -= MAXDNAME; }
 
   // daemon->naptr
   struct naptr *naptr_ptr = (struct naptr*)gb_alloc_data(sizeof(struct naptr));
@@ -522,6 +547,7 @@ int init_daemon(const uint8_t **data2, size_t *size2) {
   dhcp_c_netid->net = dhcp_netid_net;
   dhcp_c->filter = dhcp_c_netid;
   dhcp_c->template_interface = dhcp_c_temp_in;
+  if (dhcp_c->prefix < 0 || dhcp_c->prefix > 32) dhcp_c->prefix = 24;
 
   daemon->dhcp = dhcp_c;
 
@@ -544,6 +570,9 @@ int init_daemon(const uint8_t **data2, size_t *size2) {
   dhcp6_c_netid->net = dhcp6_netid_net;
   dhcp6_c->filter = dhcp6_c_netid;
   dhcp6_c->template_interface = dhcp6_c_temp_in;
+  /* prefix and prefixlen come from gb_get_random_data; clamp to a sane
+     IPv6 range so is_same_net6 doesn't memcmp with a negative size. */
+  if (dhcp6_c->prefix < 0 || dhcp6_c->prefix > 128) dhcp6_c->prefix = 64;
 
   daemon->dhcp6 = dhcp6_c;
 

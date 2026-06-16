@@ -15,7 +15,8 @@
 ################################################################################
 
 FROM gcr.io/oss-fuzz-base/base-builder
-RUN apt-get update && apt-get install -y make autoconf automake libtool
+RUN apt-get update && apt-get install -y make autoconf automake libtool \
+    pkg-config nettle-dev libgmp-dev
 RUN git clone --depth 1 git://thekelleys.org.uk/dnsmasq.git dnsmasq    
 WORKDIR dnsmasq
 COPY build.sh $SRC/
@@ -23,4 +24,5 @@ COPY fuzz*.c $SRC/
 COPY fuzz*.cc $SRC/
 COPY fuzz*.h $SRC/
 
-COPY fuzz_patch.patch $SRC/
+COPY scripts $SRC/scripts
+COPY fuzz_*.options $SRC/

@@ -33,6 +33,11 @@ static int init_daemon(FuzzedDataProvider &provider,
 
   auto make_string = [&](size_t max_len) -> char * {
     strings.push_back(provider.ConsumeRandomLengthString(max_len));
+    // Guarantee strlen > 0 so daemon-> fields don't trip dnsmasq helpers
+    // that walk past the NUL terminator on empty input.
+    if (strings.back().empty() || strings.back()[0] == '\0') {
+      strings.back() = "a";
+    }
     return strings.back().data();
   };
 
@@ -234,38 +239,69 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     std::string t2_str = provider.ConsumeRandomLengthString(MAXDNAME);
     if (t1_str.empty() || t2_str.empty())
       goto cleanup;
+    // dnsmasq's hostname_issubdomain reads one byte before the buffer when
+    // passed a zero-length C string; check_name and parse_hex also mutate
+    // their inputs in-place. Run every entry point on a fresh copy so one
+    // call's mutation can't poison the next.
+    auto run_with_copy = [](char *src, auto &&fn) {
+      if (!src) return;
+      size_t n = strlen(src);
+      if (n == 0) return;
+      char *buf = (char *)malloc(n + 1);
+      if (!buf) return;
+      memcpy(buf, src, n + 1);
+      fn(buf);
+      free(buf);
+    };
 
     char *t1 = t1_str.data();
     char *t2 = t2_str.data();
+    if (strlen(t1) == 0 || strlen(t2) == 0)
+      goto cleanup;
 
-    // Util logic
-    hostname_isequal(t1, t2);
+    run_with_copy(t1, [&](char *a) {
+      run_with_copy(t2, [&](char *b) { hostname_isequal(a, b); });
+    });
 
-    legal_hostname(t1);
-    char *tmp = canonicalise(t2, NULL);
-    if (tmp != NULL) {
-      free(tmp);
-    }
+    run_with_copy(t1, [&](char *a) { legal_hostname(a); });
+    run_with_copy(t2, [&](char *a) {
+      char *tmp = canonicalise(a, NULL);
+      if (tmp) free(tmp);
+    });
 
-    char *tmp_out = (char *)malloc(30);
-    if (tmp_out) {
+    run_with_copy(t1, [&](char *a) {
+      char *tmp_out = (char *)malloc(30);
+      if (!tmp_out) return;
       int mac_type;
-      parse_hex(t1, (unsigned char *)tmp_out, 30, NULL, NULL);
-      parse_hex(t1, (unsigned char *)tmp_out, 30, NULL, &mac_type);
+      parse_hex(a, (unsigned char *)tmp_out, 30, NULL, NULL);
       free(tmp_out);
-    }
+    });
+    run_with_copy(t1, [&](char *a) {
+      char *tmp_out = (char *)malloc(30);
+      if (!tmp_out) return;
+      int mac_type;
+      parse_hex(a, (unsigned char *)tmp_out, 30, NULL, &mac_type);
+      free(tmp_out);
+    });
 
-    wildcard_match(t1, t2);
-    if (t1_str.size() < t2_str.size()) {
-      wildcard_matchn(t1, t2, t1_str.size());
-    } else {
-      wildcard_matchn(t1, t2, t2_str.size());
+    run_with_copy(t1, [&](char *a) {
+      run_with_copy(t2, [&](char *b) { wildcard_match(a, b); });
+    });
+    {
+      size_t n = std::min(t1_str.size(), t2_str.size());
+      run_with_copy(t1, [&](char *a) {
+        run_with_copy(t2, [&](char *b) { wildcard_matchn(a, b, (int)n); });
+      });
     }
-    hostname_issubdomain(t1, t2);
+    run_with_copy(t1, [&](char *a) {
+      run_with_copy(t2, [&](char *b) { hostname_issubdomain(a, b); });
+    });
 
-    union all_addr addr1;
-    memset(&addr1, 0, sizeof(union all_addr));
-    is_name_synthetic(0, t1, &addr1);
+    run_with_copy(t1, [&](char *a) {
+      union all_addr addr1;
+      memset(&addr1, 0, sizeof(union all_addr));
+      is_name_synthetic(0, a, &addr1);
+    });
   }
 
 cleanup:
