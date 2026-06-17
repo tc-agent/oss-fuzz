@@ -9,7 +9,7 @@ sanitizers:
   - address
   - memory
 #  - undefined # TODO: Needs investigation
-main_repo: "https://github.com/google/tink"
+main_repo: "https://github.com/tink-crypto/tink-cc"
 file_github_issue: True
 
 fuzzing_engines:

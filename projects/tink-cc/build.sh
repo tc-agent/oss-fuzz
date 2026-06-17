@@ -15,7 +15,14 @@
 #
 ################################################################################
 
-cd $SRC/tink-cc/fuzzing && cmake .
+# For coverage builds, use pre-installed abseil/protobuf to avoid timeout
+# (compiling them from source with coverage flags exceeds the OSS-Fuzz limit).
+# Sanitizer builds must compile from source so all code is instrumented.
+CMAKE_EXTRA_FLAGS=""
+if [ "$SANITIZER" = "coverage" ]; then
+    CMAKE_EXTRA_FLAGS="-DTINK_USE_INSTALLED_ABSEIL=ON -DTINK_USE_INSTALLED_PROTOBUF=ON"
+fi
+cd $SRC/tink-cc/fuzzing && cmake . $CMAKE_EXTRA_FLAGS
 make -j$(nproc)
 mv tink_encrypt_fuzzer $OUT/
 

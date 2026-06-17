@@ -15,8 +15,30 @@
 ################################################################################
 
 FROM gcr.io/oss-fuzz-base/base-builder
-FROM gcr.io/oss-fuzz-base/base-builder-go
+
 RUN apt-get update && apt-get install -y make pkg-config
+
+# Pre-install abseil-cpp and protobuf so they are not recompiled during
+# coverage builds (which add instrumentation flags and make the full
+# from-source build exceed the OSS-Fuzz timeout).
+# Versions match tink-cc's cmake/TinkWorkspace.cmake pinned versions.
+
+RUN cd /tmp && \
+    curl -sL https://github.com/abseil/abseil-cpp/releases/download/20260107.0/abseil-cpp-20260107.0.tar.gz | tar xz && \
+    cd abseil-cpp-20260107.0 && mkdir build && cd build && \
+    cmake .. -DCMAKE_CXX_STANDARD=17 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+             -DABSL_BUILD_TESTING=OFF -DABSL_ENABLE_INSTALL=ON && \
+    make -j$(nproc) install && \
+    ldconfig && cd /tmp && rm -rf abseil-cpp-20260107.0
+
+RUN cd /tmp && \
+    curl -sL https://github.com/protocolbuffers/protobuf/archive/refs/tags/v30.2.tar.gz | tar xz && \
+    cd protobuf-* && mkdir build && cd build && \
+    cmake .. -DCMAKE_CXX_STANDARD=17 -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+             -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_ABSL_PROVIDER=package && \
+    make -j$(nproc) install && \
+    ldconfig && cd /tmp && rm -rf protobuf-*
+
 RUN git clone --depth 1 https://github.com/tink-crypto/tink-cc
 
 RUN mkdir $SRC/tink-cc/fuzzing
