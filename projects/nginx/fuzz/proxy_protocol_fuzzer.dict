@@ -1,0 +1,28 @@
+# PROXY protocol v1 (text)
+"PROXY "
+"TCP4 "
+"TCP6 "
+"UNKNOWN"
+"\x0d\x0a"
+"0.0.0.0"
+"::1"
+"255.255.255.255"
+"65535"
+
+# PROXY protocol v2 (binary)
+"\x0d\x0a\x0d\x0a\x00\x0d\x0aQUIT\x0a"
+"\x21\x11"
+"\x21\x21"
+"\x20\x00"
+
+# TLV types
+"\x01"
+"\x02"
+"\x05"
+"\x20"
+"\x30"
+"\x21"
+"\x22"
+"\x23"
+"\x24"
+"\x25"
