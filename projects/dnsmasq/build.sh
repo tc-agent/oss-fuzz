@@ -53,3 +53,19 @@ sed -i 's/new/new2/g' ./dnsmasq.h
 # Build the fuzzers
 $CXX $CXXFLAGS -c $SRC/fuzz_util.cc -I./ -I$SRC/ -DVERSION=\'\"UNKNOWN\"\' -g
 $CXX $CXXFLAGS $LIB_FUZZING_ENGINE ./fuzz_util.o libdnsmasq.a -o $OUT/fuzz_util
+
+# Build C harnesses: fuzz_rfc1035, fuzz_auth, fuzz_dhcp, fuzz_dhcp6
+# fuzz_blockdata_cleanup is defined as a static function in fuzz_header.h so
+# these harnesses do NOT need fuzz_util.o (which defines its own
+# LLVMFuzzerTestOneInput and would cause duplicate-symbol link errors).
+for fuzzer in fuzz_rfc1035 fuzz_auth fuzz_dhcp fuzz_dhcp6; do
+    $CC $CFLAGS -c $SRC/${fuzzer}.c -o ${fuzzer}.o -I./ -I$SRC/ -DVERSION=\'\"UNKNOWN\"\'
+    $CXX $CXXFLAGS $LIB_FUZZING_ENGINE ./${fuzzer}.o libdnsmasq.a -o $OUT/${fuzzer}
+done
+
+# Package seed corpora as zip files for OSS-Fuzz
+for fuzzer in fuzz_rfc1035 fuzz_auth fuzz_dhcp fuzz_dhcp6; do
+    if [ -d "$SRC/seeds/$fuzzer" ]; then
+        zip -j "$OUT/${fuzzer}_seed_corpus.zip" "$SRC/seeds/$fuzzer/"*
+    fi
+done

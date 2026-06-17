@@ -19,9 +19,7 @@ void FuzzAuth(const uint8_t **data2, size_t *size2) {
   const uint8_t *data = *data2;
   size_t size = *size2;
   
-  int i1 = get_int(&data, &size);
-  int i2 = get_int(&data, &size);
-  int i3 = get_int(&data, &size);
+  int local_query = get_int(&data, &size);
 
   if (size > (sizeof(struct dns_header) +50)) {
     char *new_data = malloc(size+1);
@@ -32,7 +30,7 @@ void FuzzAuth(const uint8_t **data2, size_t *size2) {
 
     time_t now;
 		union mysockaddr peer_addr;
-		answer_auth((struct dns_header *)new_data, new_data + size, size, now, &peer_addr, i1, i2, i3);
+		answer_auth((struct dns_header *)new_data, new_data + size, size, now, &peer_addr, local_query);
   }
 }
 

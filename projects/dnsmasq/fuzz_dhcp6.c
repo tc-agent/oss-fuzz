@@ -12,39 +12,44 @@ limitations under the License.
 
 #include "fuzz_header.h"
 
-/* 
- * Targets answer_auth
+/*
+ * Targets dhcp6_reply (rfc3315.c) directly, bypassing the socket layer.
+ * dhcp6_packet() calls recvmsg() to read the packet — without a real socket
+ * that always fails immediately. Calling dhcp6_reply() directly with crafted
+ * data exercises the full DHCPv6 message parsing logic.
  */
-  static int val213 = 0;
-void FuzzDhcp(const uint8_t **data2, size_t *size2) {
+void FuzzDhcp6(const uint8_t **data2, size_t *size2) {
   const uint8_t *data = *data2;
   size_t size = *size2;
-  
+  time_t now = 0;
 
-  time_t now;
-  int pxe_fd = 0;
-
-  struct iovec *dhpa = malloc(sizeof(struct iovec));
-  if (dhpa == NULL) return;
-
-  char *content = malloc(300);
-  if (content == NULL) {
-    free(dhpa);
+  if (size < 4)
     return;
-  }
-  
-  dhpa->iov_base = content;
-  dhpa->iov_len = 300;
 
-  daemon->dhcp_packet = *dhpa;
+  void *packet_buf = malloc(size);
+  if (!packet_buf) return;
+  memcpy(packet_buf, data, size);
 
-  syscall_data = data;
-  syscall_size = size;
+  daemon->dhcp_packet.iov_base = packet_buf;
+  daemon->dhcp_packet.iov_len = size;
 
-  dhcp6_packet(now);
+  char iface_name[IF_NAMESIZE] = "eth0";
+  struct in6_addr fallback, ll_addr, ula_addr, client_addr;
+  memset(&fallback, 0, sizeof(fallback));
+  memset(&ll_addr, 0, sizeof(ll_addr));
+  memset(&ula_addr, 0, sizeof(ula_addr));
+  memset(&client_addr, 0, sizeof(client_addr));
 
-  free(dhpa);
-  free(content);
+  /* multicast_dest=1 so non-relay messages are processed (RFC-9915 §16) */
+  dhcp6_reply(daemon->dhcp6, 1, 1, iface_name,
+              &fallback, &ll_addr, &ula_addr,
+              size, &client_addr, now);
+
+  free(daemon->dhcp_packet.iov_base);
+  daemon->dhcp_packet.iov_base = NULL;
+  /* dhcp6_reply writes to daemon->outpacket (separate from dhcp_packet) */
+  free(daemon->outpacket.iov_base);
+  daemon->outpacket.iov_base = NULL;
 }
 
 /*
@@ -70,7 +75,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     cache_init();
     blockdata_init();
 
-		FuzzDhcp(&data, &size);
+		FuzzDhcp6(&data, &size);
 
     cache_start_insert();
     fuzz_blockdata_cleanup();
