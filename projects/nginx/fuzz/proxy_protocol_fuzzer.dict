@@ -1,0 +1,35 @@
+# PROXY protocol v1 keywords
+pp_proxy="PROXY "
+pp_tcp4="TCP4 "
+pp_tcp6="TCP6 "
+pp_unknown="UNKNOWN"
+pp_crlf="\r\n"
+
+# PROXY protocol v2 signature
+pp_v2_sig="\r\n\r\n\x00\r\nQUIT\n"
+pp_v2_version="\x21"
+pp_v2_local="\x20"
+
+# Address families + transport
+pp_af_unspec="\x00"
+pp_af_inet_stream="\x11"
+pp_af_inet6_stream="\x21"
+pp_af_unix_stream="\x31"
+pp_af_inet_dgram="\x12"
+pp_af_inet6_dgram="\x22"
+
+# Common TLV types
+pp_tlv_alpn="\x01"
+pp_tlv_authority="\x02"
+pp_tlv_ssl="\x20"
+pp_tlv_netns="\x30"
+pp_tlv_unique_id="\x05"
+
+# IPv4 addresses
+pp_localhost="\x7f\x00\x00\x01"
+pp_private="\xc0\xa8\x01\x01"
+
+# Common ports
+pp_port_80="\x00\x50"
+pp_port_443="\x01\xbb"
+pp_port_8080="\x1f\x90"
