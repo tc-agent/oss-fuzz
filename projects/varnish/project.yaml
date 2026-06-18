@@ -5,7 +5,7 @@ auto_ccs:
   - "bsdphk@gmail.com"
   - "nils.goroll@uplex.de"
   - "martin@varnish-software.com"
-main_repo: 'https://github.com/varnishcache/varnish-cache'
+main_repo: 'https://code.vinyl-cache.org/vinyl-cache/vinyl-cache'
 fuzzing_engines:
   - "afl"
   - "honggfuzz"
