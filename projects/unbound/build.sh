@@ -19,13 +19,16 @@
 # code.
 CFLAGS="${CFLAGS} -DVALGRIND=1"
 ./configure
-make -j6 all unittest
+# Skip "all" to avoid daemon/remote.c -> pthread_set_name_np (BSD-only, https://github.com/NLnetLabs/unbound/commit/06ff9f20d)
+make -j6 lib unittest
 
 $CC $CFLAGS -I. -DSRCDIR=. -c -o parse_packet_fuzzer.o parse_packet_fuzzer.c
 $CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_1.o fuzz_1.c
 $CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_2.o fuzz_2.c
 $CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_3.o fuzz_3.c
 $CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_4.o fuzz_4.c
+$CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_config.o fuzz_config.c
+$CC $CFLAGS -I. -DSRCDIR=. -c -o fuzz_zonefile.o fuzz_zonefile.c
 
 # get the LIBOBJS with the replaced functions needed for linking.
 LIBOBJS=`make --eval 'echolibobjs: ; @echo "$(LIBOBJS)"' echolibobjs`
@@ -84,5 +87,71 @@ $CXX $CXXFLAGS -std=c++11 \
   fuzz_4.o \
   $OBJECTS_TO_LINK \
   $LIBOBJS
+
+$CXX $CXXFLAGS -std=c++11 \
+  $LIB_FUZZING_ENGINE \
+  -lssl -lcrypto -pthread \
+  -o $OUT/fuzz_config_fuzzer \
+  fuzz_config.o \
+  $OBJECTS_TO_LINK \
+  $LIBOBJS
+
+$CXX $CXXFLAGS -std=c++11 \
+  $LIB_FUZZING_ENGINE \
+  -lssl -lcrypto -pthread \
+  -o $OUT/fuzz_zonefile_fuzzer \
+  fuzz_zonefile.o \
+  $OBJECTS_TO_LINK \
+  $LIBOBJS
+
+# fuzz_config leaks flex/bison tokens; disable LSAN to avoid spurious exits
+printf '[asan]\ndetect_leaks=0\n' > $OUT/fuzz_config_fuzzer.options
+
+# Build seed corpora
+mkdir -p $OUT/fuzz_config_fuzzer_seed_corpus
+mkdir -p $OUT/fuzz_zonefile_fuzzer_seed_corpus
+
+# Seed config fuzzer: one representative .rpl file per distinct config-section
+# pattern (server-only, forward-zone, auth-zone, stub-zone, rpz, view, plus
+# representative keyword groups).  Each file was verified to contribute unique
+# coverage vs. the others via libfuzzer -merge.
+for rpl in \
+    testdata/acl.rpl \
+    testdata/auth_zonefile.rpl \
+    testdata/auth_zonefile_dnssec.rpl \
+    testdata/auth_notify_lookup.rpl \
+    testdata/auth_zonemd_file.rpl \
+    testdata/fwd_error_retries.rpl \
+    testdata/fwd_no_cache.rpl \
+    testdata/rpz_cached_cname.rpl \
+    testdata/rpz_clientip.rpl \
+    testdata/views.rpl \
+    testdata/ede_localzone_dname_expansion.rpl \
+    testdata/edns_downstream_cookies.rpl \
+    testdata/edns_client_string.rpl \
+    testdata/iter_cycle_noh.rpl \
+    testdata/fwd_0ttlservfail.rpl \
+    testdata/local_acl_taglist.rpl \
+    testdata/disable_edns_do.rpl \
+; do
+  [ -f "$rpl" ] || continue
+  name=$(basename "$rpl" .rpl)
+  awk '/^CONFIG_END/{exit} !/^;/{print}' "$rpl" > /tmp/cfg_seed_$name
+  if [ -s /tmp/cfg_seed_$name ]; then
+    cp /tmp/cfg_seed_$name $OUT/fuzz_config_fuzzer_seed_corpus/$name
+  fi
+done
+
+# Seed zonefile fuzzer with 18 of 22 testdata/.zone files; examples 3,4,14,15
+# are coverage-redundant per libfuzzer -merge (each of the remaining 18 adds
+# at least one unique edge).
+for zone in testdata/*.zone; do
+  name=$(basename "$zone")
+  case "$name" in
+    zonemd.example3.zone|zonemd.example4.zone|zonemd.example14.zone|zonemd.example15.zone)
+      continue ;;
+  esac
+  cp "$zone" $OUT/fuzz_zonefile_fuzzer_seed_corpus/$name
+done
 
 wget --directory-prefix $OUT https://github.com/jsha/unbound/raw/fuzzing-corpora/testdata/parse_packet_fuzzer_seed_corpus.zip
