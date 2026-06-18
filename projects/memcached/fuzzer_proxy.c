@@ -36,14 +36,17 @@ extern int LLVMFuzzerInitialize(int *argc, char **argv)
     event_config_set_flag(ev_config, EVENT_BASE_FLAG_NOLOCK);
     main_base = event_base_new_with_config(ev_config);
 
-    memcached_thread_init(1, NULL);
-    // get the first, and only, worker thread, and manually attach to the conn
-    LIBEVENT_THREAD *mthread = get_worker_thread(0); 
-
-    // init proxy config
+    // init proxy config before starting worker threads so setup_thread()
+    // calls proxy_thread_init() for each thread before worker_libevent()
+    // starts the event loop. If initialized after, the worker can call
+    // proxy_gc_poke() with a NULL Lua state (thr->L) and crash.
     settings.proxy_ctx = proxy_init(false, false);
     settings.proxy_enabled = true;
     settings.binding_protocol = proxy_prot;
+
+    memcached_thread_init(1, NULL);
+    // get the first, and only, worker thread, and manually attach to the conn
+    LIBEVENT_THREAD *mthread = get_worker_thread(0); 
 
     // generate connection
     fconn = conn_new(dfd, conn_parse_cmd,
@@ -55,9 +58,6 @@ extern int LLVMFuzzerInitialize(int *argc, char **argv)
     // assign worker thread
     fconn->thread = mthread;
 
-    // initialize proxy thread
-    proxy_thread_init(settings.proxy_ctx, fconn->thread);
-    
     // setup hashing
     assoc_init(HASHPOWER_DEFAULT);
     hash_init(MURMUR3_HASH);
