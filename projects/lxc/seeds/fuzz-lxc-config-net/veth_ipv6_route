@@ -1,0 +1,1 @@
+lxc.net.0.veth.ipv6.route = 2001:db8::/32

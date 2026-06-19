@@ -18,3 +18,7 @@ FROM gcr.io/oss-fuzz-base/base-builder
 RUN git clone --depth 1 https://github.com/lxc/lxc
 WORKDIR lxc
 COPY build.sh $SRC/
+COPY fuzz-lxc-idmaps.c $SRC/
+COPY fuzz-lxc-config-net.c $SRC/
+COPY seeds/fuzz-lxc-idmaps $SRC/fuzz-lxc-idmaps_seed_corpus/
+COPY seeds/fuzz-lxc-config-net $SRC/fuzz-lxc-config-net_seed_corpus/
