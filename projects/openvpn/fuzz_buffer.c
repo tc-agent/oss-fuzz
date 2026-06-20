@@ -43,8 +43,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         bufp = &buf;
       } else {
         tmp = get_random_string();
-        buf = string_alloc_buf(tmp, &gc);
-        bufp = &buf;
+        if (strlen(tmp) + 1 < BUF_SIZE_MAX) {
+          buf = string_alloc_buf(tmp, &gc);
+          bufp = &buf;
+        }
         free(tmp);
         tmp = NULL;
       }

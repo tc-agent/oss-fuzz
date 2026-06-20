@@ -40,6 +40,11 @@ apply_sed_changes() {
   sed -i 's/msg(M_FATAL/msg(M_WARN/g' ${BASE}/crypto.c
 
   sed -i 's/= write/= fuzz_write/g' ${BASE}/packet_id.c
+
+  # Don't let openvpn_getaddrinfo's retry loop clear AI_NUMERICHOST. Random
+  # fuzz hostnames otherwise hit the glibc resolver path (~10s per call),
+  # which starves fuzz_route to single-digit exec/s.
+  sed -i 's|hints.ai_flags &= ~AI_NUMERICHOST;|/* fuzz: keep AI_NUMERICHOST to avoid DNS */|' ${BASE}/socket_util.c
 }
 
 # Changes in the code so we can fuzz it.
