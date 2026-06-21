@@ -28,6 +28,20 @@ export ZLIB_PATH=$WORK
 # time. 
 sed -i 's/hold_lock_file_for_update_timeout(lk, path, flags, 0);/hold_lock_file_for_update_timeout(lk, path, flags, 5000);/g' lockfile.h
 
+# Stage the additional harnesses into the upstream oss-fuzz/ directory and
+# register them in the Makefile so the existing fuzz-all rule picks them up
+# (preserving GITLIBS/EXTLIBS link flags).
+NEW_FUZZERS="fuzz-parse-commit fuzz-parse-tag fuzz-tree-walk fuzz-fsck fuzz-refname"
+for f in $NEW_FUZZERS; do
+  cp "$SRC/$f.c" "oss-fuzz/$f.c"
+done
+
+ADD_OBJS=""
+for f in $NEW_FUZZERS; do
+  ADD_OBJS="${ADD_OBJS}FUZZ_OBJS += oss-fuzz/$f.o\n"
+done
+sed -i "/^FUZZ_OBJS += oss-fuzz\/fuzz-url-decode-mem.o\$/a ${ADD_OBJS%\\n}" Makefile
+
 # Override GITLIBS to exclude common-main.o. The fuzzing engine (libFuzzer or AFL)
 # provides its own main() that calls LLVMFuzzerTestOneInput().
 # For AFL, we also need --whole-archive to force include the AFL driver's main().
@@ -52,6 +66,11 @@ FUZZERS="$FUZZERS fuzz-pack-headers"
 FUZZERS="$FUZZERS fuzz-pack-idx"
 FUZZERS="$FUZZERS fuzz-parse-attr-line"
 FUZZERS="$FUZZERS fuzz-url-decode-mem"
+FUZZERS="$FUZZERS fuzz-parse-commit"
+FUZZERS="$FUZZERS fuzz-parse-tag"
+FUZZERS="$FUZZERS fuzz-tree-walk"
+FUZZERS="$FUZZERS fuzz-fsck"
+FUZZERS="$FUZZERS fuzz-refname"
 
 # copy fuzzers
 for fuzzer in $FUZZERS ; do
@@ -63,5 +82,12 @@ for fuzzer in $FUZZERS ; do
 [libfuzzer]
 detect_leaks = 0
 EOF
+done
+
+# package seed corpora for the new harnesses
+for f in $NEW_FUZZERS; do
+  if [ -d "$SRC/seeds/$f" ]; then
+    (cd "$SRC/seeds/$f" && zip -q -r "$OUT/${f}_seed_corpus.zip" .)
+  fi
 done
 

@@ -1,0 +1,6 @@
+object 0000000000000000000000000000000000000000
+type tree
+tag tree-tag
+tagger A U Thor <a@u.example> 1700000000 +0000
+
+tag of a tree
