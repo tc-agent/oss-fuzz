@@ -24,3 +24,5 @@ RUN $SRC/curl_fuzzer/scripts/ossfuzzdeps.sh
 
 WORKDIR $SRC/curl_fuzzer
 COPY build.sh run_tests.sh $SRC/
+COPY fuzz_*.cc $SRC/harnesses/
+COPY seeds/ $SRC/seeds/

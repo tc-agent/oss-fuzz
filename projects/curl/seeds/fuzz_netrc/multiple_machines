@@ -1,0 +1,3 @@
+machine example.com login user1 password pass1
+machine ftp.example.com login ftpuser password ftppass
+default login anon password anon@
