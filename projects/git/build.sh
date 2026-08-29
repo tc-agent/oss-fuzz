@@ -1,19 +1,4 @@
 #!/bin/bash -eu
-# Copyright 2018 Google Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
-################################################################################
 
 # build zlib
 pushd "$SRC/zlib"
@@ -25,8 +10,19 @@ export ZLIB_PATH=$WORK
 
 # Enable a timeout for lockfiles rather than exit immediately. This is to
 # overcome in case multiple processes try to lock a file around the same
-# time. 
+# time.
 sed -i 's/hold_lock_file_for_update_timeout(lk, path, flags, 0);/hold_lock_file_for_update_timeout(lk, path, flags, 5000);/g' lockfile.h
+
+# Copy new harness sources into the oss-fuzz directory
+cp $SRC/harnesses/*.c oss-fuzz/
+
+# Patch Makefile to include new harnesses in FUZZ_OBJS
+sed -i '/^FUZZ_OBJS += oss-fuzz\/fuzz-url-decode-mem.o$/a \
+FUZZ_OBJS += oss-fuzz/fuzz-parse-commit.o\
+FUZZ_OBJS += oss-fuzz/fuzz-parse-tag.o\
+FUZZ_OBJS += oss-fuzz/fuzz-tree-walk.o\
+FUZZ_OBJS += oss-fuzz/fuzz-fsck.o\
+FUZZ_OBJS += oss-fuzz/fuzz-refname.o' Makefile
 
 # Override GITLIBS to exclude common-main.o. The fuzzing engine (libFuzzer or AFL)
 # provides its own main() that calls LLVMFuzzerTestOneInput().
@@ -37,7 +33,7 @@ else
   FUZZING_ENGINE_FLAGS="$LIB_FUZZING_ENGINE"
 fi
 
-# build fuzzers
+# build all fuzzers (upstream + new harnesses)
 make -j$(nproc) CC=$CC CXX=$CXX CFLAGS="$CFLAGS" \
   FUZZ_CXXFLAGS="$CXXFLAGS" \
   LIB_FUZZING_ENGINE="$FUZZING_ENGINE_FLAGS" \
@@ -52,6 +48,11 @@ FUZZERS="$FUZZERS fuzz-pack-headers"
 FUZZERS="$FUZZERS fuzz-pack-idx"
 FUZZERS="$FUZZERS fuzz-parse-attr-line"
 FUZZERS="$FUZZERS fuzz-url-decode-mem"
+FUZZERS="$FUZZERS fuzz-parse-commit"
+FUZZERS="$FUZZERS fuzz-parse-tag"
+FUZZERS="$FUZZERS fuzz-tree-walk"
+FUZZERS="$FUZZERS fuzz-fsck"
+FUZZERS="$FUZZERS fuzz-refname"
 
 # copy fuzzers
 for fuzzer in $FUZZERS ; do
@@ -65,3 +66,7 @@ detect_leaks = 0
 EOF
 done
 
+# copy seed corpora
+for corpus in $SRC/harnesses/*_seed_corpus.zip ; do
+  [ -f "$corpus" ] && cp "$corpus" $OUT/
+done

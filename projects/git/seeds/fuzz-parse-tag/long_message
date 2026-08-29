@@ -1,0 +1,7 @@
+object 0000000000000000000000000000000000000000
+type commit
+tag annotated
+tagger A <a@b.c> 1234567890 +0000
+
+Long message with multiple lines
+and special chars: àéîõü

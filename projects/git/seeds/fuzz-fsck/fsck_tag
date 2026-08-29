@@ -1,0 +1,6 @@
+object 0000000000000000000000000000000000000000
+type commit
+tag v1.0
+tagger A <a@b.c> 1234567890 +0000
+
+release
