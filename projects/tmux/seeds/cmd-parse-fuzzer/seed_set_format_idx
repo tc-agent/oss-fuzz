@@ -1,0 +1,1 @@
+set-option -g status-format[0] "#{?#{==:#{pane_mode},copy-mode},copy,}"
