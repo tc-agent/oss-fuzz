@@ -21,7 +21,11 @@ make clean
 
 # Ensure we do static linking
 sed -i 's/libmariadb SHARED/libmariadb STATIC/g' ../libmariadb/libmariadb/CMakeLists.txt
-make
+# Only build the libraries fuzz_json links against. This avoids building
+# libmariadb client plugins (dialog.so, client_ed25519.so, etc.) as shared
+# libraries, whose link step adds -Wl,--no-undefined and fails on undefined
+# __asan_* / __sanitizer_cov_* symbols when CFLAGS contains -fsanitize=address.
+make mytap strings dbug mysys
 rm CMakeCache.txt
 
 # Build fuzzers
